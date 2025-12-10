@@ -28,7 +28,7 @@ header {
 }
 
 header h1 {
-    color: #2c3e50;
+    color: #26CCC2;
     margin-bottom: 10px;
     font-size: 1.8rem;
 }
@@ -307,7 +307,7 @@ tbody tr:hover {
 
 /* Instructions */
 .instructions {
-    background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+    background: linear-gradient(135deg, #607B8F,#FAAC68);
 }
 
 .instructions ol {
