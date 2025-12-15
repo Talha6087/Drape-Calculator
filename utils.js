@@ -24,108 +24,45 @@ const ImageUtils = {
         ctx.fillText('Click to select reference', 20, 80);
     },
     
-    // Draw level indicator on canvas
-    drawLevelIndicator: function(ctx, x, y, size, angle) {
-        const radius = size / 2;
-        
-        // Draw outer circle
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Draw inner circle
-        ctx.beginPath();
-        ctx.arc(x, y, radius * 0.8, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        
-        // Draw level lines
-        const lineLength = radius * 0.6;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(angle * Math.PI / 180);
-        
-        // Horizontal line
-        ctx.beginPath();
-        ctx.moveTo(-lineLength, 0);
-        ctx.lineTo(lineLength, 0);
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Vertical line
-        ctx.beginPath();
-        ctx.moveTo(0, -lineLength);
-        ctx.lineTo(0, lineLength);
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.restore();
-        
-        // Draw angle text
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${angle.toFixed(1)}°`, x, y + radius + 15);
-    },
-    
     // Calculate distance between two points
     distance: function(x1, y1, x2, y2) {
         return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
     },
     
-    // Calculate angle from accelerometer data
+    // Calculate angle from accelerometer data (SIMPLIFIED)
     calculateAngleFromAcceleration: function(acceleration) {
         if (!acceleration || !acceleration.x || !acceleration.y || !acceleration.z) {
             return 0;
         }
         
-        // Calculate inclination angles
-        const angleX = Math.atan2(acceleration.x, Math.sqrt(acceleration.y * acceleration.y + acceleration.z * acceleration.z));
-        const angleY = Math.atan2(acceleration.y, Math.sqrt(acceleration.x * acceleration.x + acceleration.z * acceleration.z));
+        const x = acceleration.x;
+        const y = acceleration.y;
+        const z = acceleration.z;
         
-        // Return the maximum tilt angle (in degrees)
-        const maxAngle = Math.max(Math.abs(angleX), Math.abs(angleY)) * (180 / Math.PI);
-        return maxAngle;
+        // Calculate tilt angle using simple formula
+        const angle = Math.atan2(Math.sqrt(x*x + y*y), Math.abs(z)) * (180 / Math.PI);
+        return Math.min(angle, 90); // Cap at 90 degrees
     },
     
-    // Highlight drape area on canvas
-    highlightDrapeArea: function(ctx, contour, color = 'rgba(255, 0, 0, 0.3)') {
-        if (!contour || contour.size() === 0) return;
+    // Calculate bubble position from angles (SIMPLIFIED & CORRECTED)
+    calculateBubblePosition: function(beta, gamma) {
+        // beta: front-to-back tilt (-180 to 180)
+        // gamma: left-to-right tilt (-90 to 90)
         
-        // Create a temporary canvas for highlighting
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
+        // Normalize angles to -1 to 1 range
+        const maxTilt = 45; // Maximum tilt for full bubble movement
         
-        // Get contour points
-        const points = [];
-        for (let i = 0; i < contour.data32S.length; i += 2) {
-            points.push({x: contour.data32S[i], y: contour.data32S[i+1]});
-        }
+        // Clamp values
+        const normX = Math.max(Math.min(gamma / maxTilt, 1), -1);
+        const normY = Math.max(Math.min(beta / maxTilt, 1), -1);
         
-        if (points.length > 0) {
-            // Draw filled contour
-            tempCtx.fillStyle = color;
-            tempCtx.beginPath();
-            tempCtx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
-                tempCtx.lineTo(points[i].x, points[i].y);
-            }
-            tempCtx.closePath();
-            tempCtx.fill();
-            
-            // Draw outline
-            tempCtx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-            tempCtx.lineWidth = 2;
-            tempCtx.stroke();
-            
-            // Apply to main canvas
-            ctx.drawImage(tempCanvas, 0, 0);
-        }
+        // Calculate movement (max 18px in any direction for 50px bubble)
+        const maxMovement = 18;
+        
+        return {
+            x: normX * maxMovement,
+            y: normY * maxMovement
+        };
     }
 };
 
@@ -214,7 +151,6 @@ const FileUtils = {
 };
 
 // Drape calculation formulas
-// Drape calculation formulas - UPDATED coin diameters
 const DrapeFormulas = {
     // Calculate area from diameter
     circleArea: function(diameter) {
@@ -247,7 +183,7 @@ const DrapeFormulas = {
         return referenceActualDiameter / referencePixelDiameter;
     },
     
-    // Get reference diameter based on type - UPDATED
+    // Get reference diameter based on type
     getReferenceDiameter: function(refType, customDiameter = 2.5) {
         switch(refType) {
             case 'coin2':
@@ -340,44 +276,54 @@ const UIUtils = {
         }
     },
     
- // In UIUtils.updateLevelIndicator function:
-updateLevelIndicator: function(angle) {
-    const bubbleCenter = document.querySelector('.bubble-center');
-    const levelStatus = document.getElementById('levelStatus');
+    // CORRECTED: Update level indicator with proper bubble movement
+    updateLevelIndicator: function(angle, beta = 0, gamma = 0) {
+        const bubbleCenter = document.querySelector('.bubble-center');
+        const levelStatus = document.getElementById('levelStatus');
+        
+        if (!bubbleCenter || !levelStatus) return;
+        
+        // Update angle display
+        levelStatus.textContent = angle.toFixed(1);
+        
+        // Update color based on angle
+        if (angle < 2) {
+            bubbleCenter.style.background = '#00ff00';
+            bubbleCenter.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.7)';
+            levelStatus.style.color = '#00ff00';
+        } else if (angle < 5) {
+            bubbleCenter.style.background = '#ffff00';
+            bubbleCenter.style.boxShadow = '0 0 10px rgba(255, 255, 0, 0.7)';
+            levelStatus.style.color = '#ffff00';
+        } else {
+            bubbleCenter.style.background = '#ff0000';
+            bubbleCenter.style.boxShadow = '0 0 10px rgba(255, 0, 0, 0.7)';
+            levelStatus.style.color = '#ff0000';
+        }
+        
+        // Calculate bubble position from tilt angles
+        const pos = ImageUtils.calculateBubblePosition(beta, gamma);
+        
+        // Apply transform - CORRECTED: Use proper transform
+        bubbleCenter.style.transform = `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px)`;
+    },
     
-    if (!bubbleCenter || !levelStatus) return;
-    
-    // Update angle display
-    levelStatus.textContent = angle.toFixed(1);
-    
-    // Remove previous classes
-    bubbleCenter.classList.remove('level-good', 'level-moderate', 'level-extreme');
-    
-    // Update color based on angle
-    if (angle < 2) {
-        levelStatus.style.color = '#00ff00';
-        bubbleCenter.classList.add('level-good');
-    } else if (angle < 5) {
-        levelStatus.style.color = '#ffff00';
-        bubbleCenter.classList.add('level-moderate');
-    } else {
-        levelStatus.style.color = '#ff0000';
-        bubbleCenter.classList.add('level-extreme');
+    // Reset level indicator
+    resetLevelIndicator: function() {
+        const bubbleCenter = document.querySelector('.bubble-center');
+        const levelStatus = document.getElementById('levelStatus');
+        
+        if (bubbleCenter) {
+            bubbleCenter.style.transform = 'translate(-50%, -50%) translate(0px, 0px)';
+            bubbleCenter.style.background = '#00ff00';
+            bubbleCenter.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.7)';
+        }
+        
+        if (levelStatus) {
+            levelStatus.textContent = '0.0';
+            levelStatus.style.color = '#00ff00';
+        }
     }
-    
-    // Calculate bubble movement based on angle
-    // For a 50px bubble, max movement should be ~20px
-    const maxMovement = 20;
-    const movement = Math.min(angle * 2, maxMovement); // Scale factor
-    
-    // Convert angle to X and Y offsets (simplified)
-    // For a real accelerometer, you'd use the actual X/Y tilt values
-    const offsetX = Math.sin(angle * Math.PI / 180) * movement;
-    const offsetY = Math.cos(angle * Math.PI / 180) * movement;
-    
-    // Apply the transform
-    bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
-}
 };
 
 // Device utilities
@@ -421,47 +367,3 @@ window.FileUtils = FileUtils;
 window.DrapeFormulas = DrapeFormulas;
 window.UIUtils = UIUtils;
 window.DeviceUtils = DeviceUtils;
-
-// Add CSS for buttons and other UI elements
-document.addEventListener('DOMContentLoaded', function() {
-    const style = document.createElement('style');
-    style.textContent = `
-        .btn-small {
-            padding: 5px 10px;
-            font-size: 0.8rem;
-            background: #e74c3c;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        
-        .btn-small:hover {
-            background: #c0392b;
-        }
-        
-        .btn-small:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .level-good {
-            color: #00ff00 !important;
-        }
-        
-        .level-warning {
-            color: #ffff00 !important;
-        }
-        
-        .level-bad {
-            color: #ff0000 !important;
-        }
-        
-        #levelStatus {
-            font-weight: bold;
-            transition: color 0.3s;
-        }
-    `;
-    document.head.appendChild(style);
-});
