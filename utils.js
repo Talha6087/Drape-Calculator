@@ -1718,6 +1718,38 @@ const ReferenceDetection = {
         return null;
     }
 };
+
+// Export all utilities
+window.ImageUtils = ImageUtils;
+window.Validation = Validation;
+window.FileUtils = FileUtils;
+window.DrapeFormulas = DrapeFormulas;
+window.UIUtils = UIUtils;
+window.DeviceUtils = DeviceUtils;
+window.CameraUtils = CameraUtils;
+window.UploadUtils = UploadUtils;
+window.ImageAnalysis = ImageAnalysis;
+window.CoordinateUtils = CoordinateUtils;
+window.ReferenceDetection = ReferenceDetection;
+window.ImageDataUtils = ImageDataUtils;
+window.OpenCVUtils = OpenCVUtils;
+
+// Also export a global helper object
+window.DrapeCalculatorUtils = {
+    ImageUtils,
+    Validation,
+    FileUtils,
+    DrapeFormulas,
+    UIUtils,
+    DeviceUtils,
+    CameraUtils,
+    UploadUtils,
+    ImageAnalysis,
+    CoordinateUtils,
+    ReferenceDetection
+};
+// Add these functions to your existing utils.js file
+
 // Fixed ImageData utilities
 const ImageDataUtils = {
     // FIXED: Create ImageData from OpenCV Mat with proper dimensions
@@ -1951,32 +1983,4 @@ const OpenCVUtils = {
         }
     }
 };
-// Export all utilities
-window.ImageUtils = ImageUtils;
-window.Validation = Validation;
-window.FileUtils = FileUtils;
-window.DrapeFormulas = DrapeFormulas;
-window.UIUtils = UIUtils;
-window.DeviceUtils = DeviceUtils;
-window.CameraUtils = CameraUtils;
-window.UploadUtils = UploadUtils;
-window.ImageAnalysis = ImageAnalysis;
-window.CoordinateUtils = CoordinateUtils;
-window.ReferenceDetection = ReferenceDetection;
-window.ImageDataUtils = ImageDataUtils;
-window.OpenCVUtils = OpenCVUtils;
 
-// Also export a global helper object
-window.DrapeCalculatorUtils = {
-    ImageUtils,
-    Validation,
-    FileUtils,
-    DrapeFormulas,
-    UIUtils,
-    DeviceUtils,
-    CameraUtils,
-    UploadUtils,
-    ImageAnalysis,
-    CoordinateUtils,
-    ReferenceDetection
-};
