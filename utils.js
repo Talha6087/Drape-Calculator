@@ -947,31 +947,32 @@ const DeviceUtils = {
 };
 
 // Camera utilities
+  // Add this to the CameraUtils section in utils.js (replace the existing initCamera and startCamera):
 const CameraUtils = {
     stream: null,
     videoElement: null,
     canvasElement: null,
     
-    // Initialize camera
+    // FIXED: Initialize camera properly
     initCamera: function(videoId = 'cameraVideo', canvasId = 'cameraCanvas') {
-        this.videoElement = document.getElementById(videoId);
-        this.canvasElement = document.getElementById(canvasId);
-        
-        if (!this.videoElement) {
-            console.error('Video element not found');
-            return Promise.reject('Video element not found');
-        }
-        
-        if (!this.canvasElement) {
-            console.error('Canvas element not found');
-            return Promise.reject('Canvas element not found');
-        }
-        
-        return this.startCamera();
+        return new Promise((resolve, reject) => {
+            this.videoElement = document.getElementById(videoId);
+            this.canvasElement = document.getElementById(canvasId);
+            
+            if (!this.videoElement) {
+                reject('Video element not found');
+                return;
+            }
+            
+            // Start camera directly
+            this.startCamera()
+                .then(resolve)
+                .catch(reject);
+        });
     },
     
-    // Start camera stream
-    startCamera: function(constraints = null) {
+    // FIXED: Start camera with better error handling
+    startCamera: function() {
         return new Promise((resolve, reject) => {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 reject('Camera not supported on this device');
@@ -983,64 +984,55 @@ const CameraUtils = {
                 this.stopCamera();
             }
             
-            const defaultConstraints = {
+            const constraints = {
                 video: {
-                    facingMode: 'environment', // Prefer rear camera
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 },
                 audio: false
             };
             
-            const finalConstraints = constraints || defaultConstraints;
-            
-            navigator.mediaDevices.getUserMedia(finalConstraints)
+            navigator.mediaDevices.getUserMedia(constraints)
                 .then(stream => {
                     this.stream = stream;
                     this.videoElement.srcObject = stream;
                     
                     this.videoElement.onloadedmetadata = () => {
-                        // Set canvas dimensions to match video
-                        this.canvasElement.width = this.videoElement.videoWidth;
-                        this.canvasElement.height = this.videoElement.videoHeight;
+                        // Set canvas dimensions
+                        if (this.canvasElement) {
+                            this.canvasElement.width = this.videoElement.videoWidth;
+                            this.canvasElement.height = this.videoElement.videoHeight;
+                        }
                         
-                        // Start video playback
-                        this.videoElement.play()
-                            .then(() => {
-                                resolve({
-                                    width: this.videoElement.videoWidth,
-                                    height: this.videoElement.videoHeight,
-                                    stream: stream
-                                });
-                            })
-                            .catch(reject);
+                        resolve({
+                            width: this.videoElement.videoWidth,
+                            height: this.videoElement.videoHeight,
+                            stream: stream
+                        });
                     };
+                    
+                    this.videoElement.play().catch(reject);
                 })
                 .catch(error => {
-                    console.error('Error accessing camera:', error);
+                    console.error('Camera access error:', error);
                     
-                    // Try with less restrictive constraints
-                    const fallbackConstraints = { video: true };
+                    // Try with simpler constraints
+                    const fallbackConstraints = { 
+                        video: { facingMode: 'environment' } 
+                    };
                     
                     navigator.mediaDevices.getUserMedia(fallbackConstraints)
                         .then(stream => {
                             this.stream = stream;
                             this.videoElement.srcObject = stream;
-                            
-                            this.videoElement.onloadedmetadata = () => {
-                                this.canvasElement.width = this.videoElement.videoWidth;
-                                this.canvasElement.height = this.videoElement.videoHeight;
-                                
-                                this.videoElement.play()
-                                    .then(() => {
-                                        resolve({
-                                            width: this.videoElement.videoWidth,
-                                            height: this.videoElement.videoHeight,
-                                            stream: stream
-                                        });
-                                    })
-                                    .catch(reject);
-                            };
+                            this.videoElement.play().then(() => {
+                                resolve({
+                                    width: this.videoElement.videoWidth,
+                                    height: this.videoElement.videoHeight,
+                                    stream: stream
+                                });
+                            }).catch(reject);
                         })
                         .catch(fallbackError => {
                             reject(`Camera access denied: ${fallbackError.message}`);
@@ -1049,6 +1041,8 @@ const CameraUtils = {
         });
     },
     
+    // ... rest of CameraUtils remains the same ...
+};  
     // Stop camera stream
     stopCamera: function() {
         if (this.stream) {
