@@ -360,6 +360,58 @@ const DeviceUtils = {
     }
 };
 
+const ImageUtils = {
+    // ... existing functions ...
+    
+    // Calculate precise canvas click coordinates
+    calculateCanvasClick: function(event, canvas, actualWidth, actualHeight) {
+        const rect = canvas.getBoundingClientRect();
+        const offsetX = parseFloat(canvas.dataset.offsetX) || 0;
+        const offsetY = parseFloat(canvas.dataset.offsetY) || 0;
+        const renderedWidth = parseFloat(canvas.dataset.renderedWidth) || rect.width;
+        const renderedHeight = parseFloat(canvas.dataset.renderedHeight) || rect.height;
+        
+        // Get click position
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        
+        // Calculate position within rendered image
+        const renderedX = clickX - offsetX;
+        const renderedY = clickY - offsetY;
+        
+        // Calculate scale factors
+        const scaleX = actualWidth / renderedWidth;
+        const scaleY = actualHeight / renderedHeight;
+        
+        // Calculate actual coordinates
+        const actualX = Math.round(renderedX * scaleX);
+        const actualY = Math.round(renderedY * scaleY);
+        
+        // Clamp to canvas bounds
+        const clampedX = Math.max(0, Math.min(actualX, actualWidth - 1));
+        const clampedY = Math.max(0, Math.min(actualY, actualHeight - 1));
+        
+        return {
+            clickX: clickX,
+            clickY: clickY,
+            renderedX: renderedX,
+            renderedY: renderedY,
+            actualX: clampedX,
+            actualY: clampedY,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            offsetX: offsetX,
+            offsetY: offsetY,
+            isWithinImage: (
+                renderedX >= 0 && renderedX <= renderedWidth &&
+                renderedY >= 0 && renderedY <= renderedHeight
+            )
+        };
+    },
+    
+  
+};
+
 // Export all utilities
 window.ImageUtils = ImageUtils;
 window.Validation = Validation;
