@@ -126,13 +126,27 @@ function startLevelMonitoring() {
 }
 
 // Handle device motion for level detection
+// Handle device motion for level detection - IMPROVED
 function handleDeviceMotion(event) {
     if (!event.accelerationIncludingGravity) return;
     
-    const acceleration = event.accelerationIncludingGravity;
-    const angle = ImageUtils.calculateAngleFromAcceleration(acceleration);
+    const accel = event.accelerationIncludingGravity;
+    
+    // Calculate tilt angles in degrees
+    // Using more accurate formulas for device orientation
+    const x = accel.x || 0;
+    const y = accel.y || 0;
+    const z = accel.z || 9.81; // Default to gravity
+    
+    // Calculate tilt angles
+    const angleX = Math.atan2(x, Math.sqrt(y * y + z * z)) * (180 / Math.PI);
+    const angleY = Math.atan2(y, Math.sqrt(x * x + z * z)) * (180 / Math.PI);
+    
+    // Use the maximum tilt angle
+    const angle = Math.max(Math.abs(angleX), Math.abs(angleY));
     currentAngle = angle;
     
+    // Update the level indicator
     UIUtils.updateLevelIndicator(angle);
     
     // Show warning if angle is too large
@@ -141,82 +155,79 @@ function handleDeviceMotion(event) {
     }
 }
 
-// Validate diameters
-function validateDiameters() {
-    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value);
-    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value);
-    
-    const validation = Validation.validateDrapeInputs(diskDiameter, fabricDiameter);
-    if (!validation.valid) {
-        UIUtils.showToast(validation.error, 'warning');
-    }
-}
-
-// Start camera function
-async function startCamera() {
-    if (streaming) return;
-    
-    const video = document.getElementById('video');
-    const statusElement = document.getElementById('status');
-    
-    // Check camera permissions and capabilities
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        UIUtils.showToast('Camera access not supported in this browser', 'error');
+// Alternative: Use device orientation API (often more accurate on mobile)
+function setupAccelerometer() {
+    if (!DeviceUtils.hasAccelerometer()) {
+        console.log('Accelerometer not available');
+        // Fallback for desktop testing
+        levelInterval = setInterval(() => {
+            if (streaming) {
+                // Simulate small random movement for testing
+                const simulatedAngle = Math.random() * 10;
+                UIUtils.updateLevelIndicator(simulatedAngle);
+            }
+        }, 1000);
         return;
     }
     
-    UIUtils.showLoading(true, 'Accessing camera...');
-    
-    try {
-        // Request camera access
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: 'environment', // Use back camera on mobile
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-            },
-            audio: false 
-        });
-        
-        stream = mediaStream;
-        video.srcObject = stream;
-        
-        // Wait for video to start playing
-        await video.play();
-        
-        // Update UI
-        UIUtils.updateButtonState('startCamera', false, '<i class="fas fa-camera"></i> Camera Active');
-        UIUtils.updateButtonState('capture', true);
-        UIUtils.updateButtonState('reset', true);
-        UIUtils.updateButtonState('uploadImage', false);
-        
-        statusElement.textContent = 'Camera ready - Level your device above the drape';
-        streaming = true;
-        
-        // Start level monitoring
-        startLevelMonitoring();
-        
-        UIUtils.showToast('Camera started successfully. Ensure device is level.', 'success');
-        
-    } catch (error) {
-        console.error('Error accessing camera:', error);
-        let errorMessage = 'Unable to access camera. ';
-        
-        if (error.name === 'NotAllowedError') {
-            errorMessage += 'Please grant camera permissions.';
-        } else if (error.name === 'NotFoundError') {
-            errorMessage += 'No camera found.';
-        } else if (error.name === 'NotReadableError') {
-            errorMessage += 'Camera is already in use.';
-        } else {
-            errorMessage += error.message;
-        }
-        
-        statusElement.textContent = errorMessage;
-        UIUtils.showToast(errorMessage, 'error');
-    } finally {
-        UIUtils.showLoading(false);
+    // Try DeviceOrientation API first (more accurate for tilt)
+    if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+    } else if (window.DeviceMotionEvent) {
+        // Fallback to DeviceMotion API
+        window.addEventListener('devicemotion', handleDeviceMotion);
     }
+    
+    // Request permission for iOS 13+
+    DeviceUtils.requestAccelerometerPermission().then(granted => {
+        if (!granted) {
+            console.log('Accelerometer permission denied');
+        }
+    });
+}
+
+// Device orientation handler (more accurate for tilt)
+function handleDeviceOrientation(event) {
+    // Beta is the front-to-back tilt in degrees (-180 to 180)
+    // Gamma is the left-to-right tilt in degrees (-90 to 90)
+    const beta = event.beta || 0; // Front-to-back tilt
+    const gamma = event.gamma || 0; // Left-to-right tilt
+    
+    // Calculate overall tilt angle
+    const angle = Math.sqrt(beta * beta + gamma * gamma);
+    currentAngle = angle;
+    
+    // Update level indicator
+    UIUtils.updateLevelIndicator(angle);
+    
+    // Update bubble position based on actual tilt
+    updateBubblePosition(beta, gamma);
+    
+    // Show warning if needed
+    if (streaming && angle > 10) {
+        document.getElementById('status').textContent = `Warning: Camera tilted ${angle.toFixed(1)}°. Level your device.`;
+    }
+}
+
+// Update bubble position based on X/Y tilt
+function updateBubblePosition(beta, gamma) {
+    const bubbleCenter = document.querySelector('.bubble-center');
+    if (!bubbleCenter) return;
+    
+    // Normalize tilt values to -1 to 1 range
+    const maxTilt = 30; // Maximum tilt angle for full bubble movement
+    
+    // Calculate normalized positions
+    const normX = Math.max(Math.min(gamma / maxTilt, 1), -1);
+    const normY = Math.max(Math.min(beta / maxTilt, 1), -1);
+    
+    // Calculate movement (max 20px in any direction)
+    const maxMovement = 20;
+    const offsetX = normX * maxMovement;
+    const offsetY = normY * maxMovement;
+    
+    // Apply transform
+    bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
 }
 // SIMPLIFIED UPLOAD FUNCTION - Use this if above doesn't work
 function handleImageUpload(event) {
