@@ -218,76 +218,94 @@ async function startCamera() {
         UIUtils.showLoading(false);
     }
 }
-
-// Handle image upload
+// SIMPLIFIED UPLOAD FUNCTION - Use this if above doesn't work
 function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
     
-    if (!file.type.match('image.*')) {
-        UIUtils.showToast('Please select an image file', 'error');
-        return;
-    }
+    const reader = new FileReader();
     
-    UIUtils.showLoading(true, 'Loading image...');
-    
-    FileUtils.loadImage(file)
-        .then(img => {
+    reader.onload = function(e) {
+        const img = new Image();
+        
+        img.onload = function() {
+            // Create canvas elements
+            const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
-            const outputCanvas = document.getElementById('originalCanvas');
+            const originalCanvas = document.getElementById('originalCanvas');
             
-            // Set canvas dimensions to image dimensions
-            canvas.width = img.width;
-            canvas.height = img.height;
-            outputCanvas.width = img.width;
-            outputCanvas.height = img.height;
+            // Hide video
+            video.style.display = 'none';
             
-            // Draw image to canvas
-            const context = canvas.getContext('2d');
-            context.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // Set dimensions
+            const maxDisplayWidth = 800;
+            const maxDisplayHeight = 600;
             
-            // Store the image data
-            capturedImage = context.getImageData(0, 0, canvas.width, canvas.height);
+            let displayWidth = img.width;
+            let displayHeight = img.height;
             
-            // Display the image on output canvas
-            const outputContext = outputCanvas.getContext('2d');
-            outputContext.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
-            
-            // Update UI
-            document.getElementById('status').textContent = 'Image loaded. Click on reference object (coin) in image';
-            document.getElementById('capture').disabled = true;
-            document.getElementById('startCamera').disabled = true;
-            document.getElementById('uploadImage').disabled = true;
-            document.getElementById('reset').disabled = false;
-            
-            // Store canvas dimensions for click coordinate mapping
-            currentCanvas = outputCanvas;
-            canvasDisplayWidth = outputCanvas.offsetWidth;
-            canvasDisplayHeight = outputCanvas.offsetHeight;
-            canvasActualWidth = outputCanvas.width;
-            canvasActualHeight = outputCanvas.height;
-            
-            // Enable canvas clicking for reference selection
-            outputCanvas.style.cursor = 'crosshair';
-            outputCanvas.addEventListener('click', handleCanvasClick);
-            
-            // Auto-detect reference if enabled
-            if (document.getElementById('autoDetectReference').checked) {
-                setTimeout(autoDetectReference, 500);
+            // Scale for display while maintaining aspect ratio
+            if (displayWidth > maxDisplayWidth || displayHeight > maxDisplayHeight) {
+                const scale = Math.min(
+                    maxDisplayWidth / displayWidth,
+                    maxDisplayHeight / displayHeight
+                );
+                displayWidth = Math.floor(displayWidth * scale);
+                displayHeight = Math.floor(displayHeight * scale);
             }
             
-            UIUtils.showToast('Image loaded successfully', 'success');
-        })
-        .catch(error => {
-            console.error('Error loading image:', error);
-            UIUtils.showToast('Error loading image: ' + error.message, 'error');
-            document.getElementById('status').textContent = 'Error loading image';
-        })
-        .finally(() => {
-            UIUtils.showLoading(false);
-            // Reset file input
-            event.target.value = '';
-        });
+            // Set canvas sizes
+            canvas.width = img.width;
+            canvas.height = img.height;
+            originalCanvas.width = displayWidth;
+            originalCanvas.height = displayHeight;
+            
+            // Draw to processing canvas (full size)
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Store image data
+            capturedImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // Draw to display canvas (scaled)
+            const displayCtx = originalCanvas.getContext('2d');
+            displayCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
+            
+            // Make visible
+            originalCanvas.style.display = 'block';
+            
+            // Update UI
+            document.getElementById('status').textContent = 'Click on reference object (coin)';
+            document.getElementById('capture').disabled = true;
+            document.getElementById('startCamera').disabled = true;
+            document.getElementById('uploadImage').disabled = false;
+            document.getElementById('reset').disabled = false;
+            
+            // Setup for clicking
+            currentCanvas = originalCanvas;
+            canvasDisplayWidth = originalCanvas.offsetWidth;
+            canvasDisplayHeight = originalCanvas.offsetHeight;
+            canvasActualWidth = originalCanvas.width;
+            canvasActualHeight = originalCanvas.height;
+            
+            originalCanvas.style.cursor = 'crosshair';
+            originalCanvas.addEventListener('click', handleCanvasClick);
+            
+            UIUtils.showToast('Image loaded. Click on the coin.', 'success');
+        };
+        
+        img.onerror = function() {
+            UIUtils.showToast('Error loading image', 'error');
+        };
+        
+        img.src = e.target.result;
+    };
+    
+    reader.onerror = function() {
+        UIUtils.showToast('Error reading file', 'error');
+    };
+    
+    reader.readAsDataURL(file);
 }
 
 // Capture image function
