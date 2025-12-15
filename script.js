@@ -1,4 +1,4 @@
-// Drape Area Calculator - FIXED Drape Coefficient Calculation
+// Drape Area Calculator - Fixed ImageData Construction Error
 
 // Global variables
 let stream = null;
@@ -7,19 +7,20 @@ let capturedImage = null;
 let referencePoint = null;
 let measurementHistory = [];
 let isProcessing = false;
-let cv = null;
+let cv = null; // OpenCV instance
 let originalImageMat = null;
 let processedImageMat = null;
 let displayScale = 1;
 let actualWidth = 0;
 let actualHeight = 0;
-let pixelToCmRatio = 1; // CRITICAL: Store this globally
-let referenceRadiusPixels = 0;
+let imageDataURL = null; // Store original image data URL
+let displayWidth = 0;
+let displayHeight = 0;
 
 // OpenCV ready handler
 function onOpenCvReady() {
     console.log('OpenCV.js is ready');
-    cv = window.cv;
+    cv = window.cv; // Get OpenCV from global scope
     initializeApp();
 }
 
@@ -37,9 +38,6 @@ function initializeApp() {
     // Set up all event listeners
     setupEventListeners();
     
-    // ADD THIS LINE: Setup diagnostic listeners
-    setupDiagnosticListeners();
-    
     // Load history from localStorage
     loadHistory();
     
@@ -52,12 +50,175 @@ function initializeApp() {
     console.log('App initialized successfully');
 }
 
-// Setup event listeners
+// Set up all event listeners
 function setupEventListeners() {
-    // ... (keep your existing event listener setup code) ...
+    console.log('Setting up event listeners...');
+    
+    // Start Camera button
+    const startCameraBtn = document.getElementById('startCamera');
+    if (startCameraBtn) {
+        startCameraBtn.addEventListener('click', startCamera);
+        console.log('Start Camera button listener added');
+    } else {
+        console.error('Start Camera button not found!');
+    }
+    
+    // Upload Image button
+    const uploadImageBtn = document.getElementById('uploadImage');
+    if (uploadImageBtn) {
+        uploadImageBtn.addEventListener('click', () => {
+            console.log('Upload Image button clicked');
+            document.getElementById('fileInput').click();
+        });
+        console.log('Upload Image button listener added');
+    } else {
+        console.error('Upload Image button not found!');
+    }
+    
+    // File input
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+        fileInput.addEventListener('change', handleImageUpload);
+        console.log('File input listener added');
+    } else {
+        console.error('File input not found!');
+    }
+    
+    // Capture button
+    const captureBtn = document.getElementById('capture');
+    if (captureBtn) {
+        captureBtn.addEventListener('click', captureImage);
+        console.log('Capture button listener added');
+    } else {
+        console.error('Capture button not found!');
+    }
+    
+    // Reset button
+    const resetBtn = document.getElementById('reset');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetApp);
+        console.log('Reset button listener added');
+    } else {
+        console.error('Reset button not found!');
+    }
+    
+    // Calculate Drape button
+    const calculateDrapeBtn = document.getElementById('calculateDrape');
+    if (calculateDrapeBtn) {
+        calculateDrapeBtn.addEventListener('click', calculateDrapePercentage);
+        console.log('Calculate Drape button listener added');
+    } else {
+        console.error('Calculate Drape button not found!');
+    }
+    
+    // Auto Calculate button
+    const autoCalculateBtn = document.getElementById('autoCalculate');
+    if (autoCalculateBtn) {
+        autoCalculateBtn.addEventListener('click', autoCalculateDrape);
+        console.log('Auto Calculate button listener added');
+    } else {
+        console.error('Auto Calculate button not found!');
+    }
+    
+    // Export CSV button
+    const exportDataBtn = document.getElementById('exportData');
+    if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', exportToCSV);
+        console.log('Export Data button listener added');
+    } else {
+        console.error('Export Data button not found!');
+    }
+    
+    // Clear History button
+    const clearHistoryBtn = document.getElementById('clearHistory');
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener('click', clearHistory);
+        console.log('Clear History button listener added');
+    } else {
+        console.error('Clear History button not found!');
+    }
+    
+    // Reference type change
+    const refTypeSelect = document.getElementById('refType');
+    if (refTypeSelect) {
+        refTypeSelect.addEventListener('change', function() {
+            const customRef = document.getElementById('customRef');
+            if (this.value === 'custom') {
+                customRef.style.display = 'block';
+            } else {
+                customRef.style.display = 'none';
+            }
+        });
+        console.log('Reference type listener added');
+    }
+    
+    // Canvas click for reference selection - FIXED
+    const originalCanvas = document.getElementById('originalCanvas');
+    if (originalCanvas) {
+        originalCanvas.addEventListener('click', handleCanvasClick);
+        console.log('Canvas click listener added');
+    }
+    
+    console.log('All event listeners set up');
 }
 
-// Handle canvas click for reference selection
+// Initialize device orientation for level indicator
+function initializeLevelIndicator() {
+    if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+    } else {
+        console.log('Device orientation not supported');
+    }
+}
+
+// Handle device orientation for level indicator
+function handleDeviceOrientation(event) {
+    const beta = event.beta;  // front-to-back tilt (-180 to 180)
+    const gamma = event.gamma; // left-to-right tilt (-90 to 90)
+    
+    if (beta !== null && gamma !== null) {
+        // Calculate overall tilt angle
+        const angle = Math.sqrt(beta * beta + gamma * gamma);
+        
+        // Update level indicator
+        const bubbleCenter = document.querySelector('.bubble-center');
+        const levelStatus = document.getElementById('levelStatus');
+        
+        if (bubbleCenter && levelStatus) {
+            // Calculate bubble position
+            const maxTilt = 45;
+            const maxMovement = 18;
+            
+            const normX = Math.max(Math.min(gamma / maxTilt, 1), -1);
+            const normY = Math.max(Math.min(beta / maxTilt, 1), -1);
+            
+            const posX = normX * maxMovement;
+            const posY = normY * maxMovement;
+            
+            bubbleCenter.style.transform = `translate(-50%, -50%) translate(${posX}px, ${posY}px)`;
+            
+            // Update angle display
+            levelStatus.textContent = angle.toFixed(1);
+            
+            // Update color based on angle
+            if (angle < 2) {
+                bubbleCenter.style.background = '#00ff00';
+                bubbleCenter.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.7)';
+                levelStatus.style.color = '#00ff00';
+            } else if (angle < 5) {
+                bubbleCenter.style.background = '#ffff00';
+                bubbleCenter.style.boxShadow = '0 0 10px rgba(255, 255, 0, 0.7)';
+                levelStatus.style.color = '#ffff00';
+            } else {
+                bubbleCenter.style.background = '#ff0000';
+                bubbleCenter.style.boxShadow = '0 0 10px rgba(255, 0, 0, 0.7)';
+                levelStatus.style.color = '#ff0000';
+            }
+        }
+    }
+}
+
+// FIXED: Handle canvas click for reference selection
 function handleCanvasClick(event) {
     if (!originalImageMat) {
         alert('Please capture or upload an image first');
@@ -67,7 +228,7 @@ function handleCanvasClick(event) {
     const canvas = event.target;
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate click position
+    // Calculate click position in canvas coordinates
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
@@ -98,19 +259,370 @@ function handleCanvasClick(event) {
     
     console.log('Reference point stored:', referencePoint);
     
-    // Draw visual feedback
+    // Draw visual feedback on the canvas
     drawReferenceMarker(canvas, x, y);
+    
+    // Create click animation
     createClickFeedback(x, y);
     
+    // Update status
     document.getElementById('status').textContent = 'Reference selected. Processing image...';
+    
+    // Enable calculation buttons
     updateUIState();
     
+    // Process image immediately
     setTimeout(() => {
         processImageWithReference();
     }, 300);
 }
 
-// Process image with reference - FIXED VERSION
+// Draw reference marker on canvas
+function drawReferenceMarker(canvas, x, y) {
+    const ctx = canvas.getContext('2d');
+    
+    // Save current context state
+    ctx.save();
+    
+    // Draw outer circle
+    ctx.beginPath();
+    ctx.arc(x, y, 15, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+    ctx.fill();
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw inner crosshair
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y);
+    ctx.lineTo(x + 10, y);
+    ctx.moveTo(x, y - 10);
+    ctx.lineTo(x, y + 10);
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw center dot
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#00ff00';
+    ctx.fill();
+    
+    // Add label with background
+    ctx.font = 'bold 12px Arial';
+    const text = 'REF';
+    const textWidth = ctx.measureText(text).width;
+    
+    // Draw text background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(x - textWidth/2 - 5, y - 35, textWidth + 10, 18);
+    
+    // Draw text
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, x, y - 25);
+    
+    // Restore context
+    ctx.restore();
+    
+    // Force canvas redraw
+    canvas.style.display = 'none';
+    canvas.style.display = 'block';
+}
+
+// Create click feedback animation
+function createClickFeedback(x, y) {
+    const feedback = document.createElement('div');
+    feedback.className = 'click-feedback';
+    feedback.style.left = (x - 15) + 'px';
+    feedback.style.top = (y - 15) + 'px';
+    
+    const cameraContainer = document.querySelector('.camera-container');
+    cameraContainer.appendChild(feedback);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (feedback.parentNode) {
+            feedback.parentNode.removeChild(feedback);
+        }
+    }, 500);
+}
+
+// Update UI state based on current status
+function updateUIState() {
+    const captureBtn = document.getElementById('capture');
+    const resetBtn = document.getElementById('reset');
+    const startCameraBtn = document.getElementById('startCamera');
+    const uploadImageBtn = document.getElementById('uploadImage');
+    const calculateDrapeBtn = document.getElementById('calculateDrape');
+    const autoCalculateBtn = document.getElementById('autoCalculate');
+    
+    if (originalImageMat) {
+        // Image is captured/uploaded
+        if (captureBtn) captureBtn.disabled = true;
+        if (resetBtn) resetBtn.disabled = false;
+        if (startCameraBtn) startCameraBtn.disabled = true;
+        if (uploadImageBtn) uploadImageBtn.disabled = false;
+        if (calculateDrapeBtn) calculateDrapeBtn.disabled = false;
+        if (autoCalculateBtn) autoCalculateBtn.disabled = false;
+    } else if (streaming) {
+        // Camera is streaming
+        if (captureBtn) captureBtn.disabled = false;
+        if (resetBtn) resetBtn.disabled = false;
+        if (startCameraBtn) startCameraBtn.disabled = true;
+        if (uploadImageBtn) uploadImageBtn.disabled = true;
+        if (calculateDrapeBtn) calculateDrapeBtn.disabled = true;
+        if (autoCalculateBtn) autoCalculateBtn.disabled = true;
+    } else {
+        // Initial state
+        if (captureBtn) captureBtn.disabled = true;
+        if (resetBtn) resetBtn.disabled = true;
+        if (startCameraBtn) startCameraBtn.disabled = false;
+        if (uploadImageBtn) uploadImageBtn.disabled = false;
+        if (calculateDrapeBtn) calculateDrapeBtn.disabled = true;
+        if (autoCalculateBtn) autoCalculateBtn.disabled = true;
+    }
+}
+
+// Start camera function
+async function startCamera() {
+    console.log('Starting camera...');
+    
+    const video = document.getElementById('video');
+    const statusElement = document.getElementById('status');
+    
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Camera access is not supported in your browser. Please use Chrome, Firefox, or Edge.');
+        return;
+    }
+    
+    try {
+        statusElement.textContent = 'Requesting camera access...';
+        
+        // Request camera access
+        stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false 
+        });
+        
+        video.srcObject = stream;
+        
+        // Wait for video to start
+        await video.play();
+        
+        streaming = true;
+        statusElement.textContent = 'Camera ready. Click "Capture & Analyze" when ready.';
+        
+        // Update UI
+        updateUIState();
+        
+        console.log('Camera started successfully');
+        
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+        
+        let errorMessage = 'Could not access camera: ';
+        if (error.name === 'NotAllowedError') {
+            errorMessage += 'Camera permission denied. Please allow camera access.';
+        } else if (error.name === 'NotFoundError') {
+            errorMessage += 'No camera found on your device.';
+        } else if (error.name === 'NotReadableError') {
+            errorMessage += 'Camera is already in use by another application.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        statusElement.textContent = errorMessage;
+        alert(errorMessage);
+    }
+}
+
+// Handle image upload
+function handleImageUpload(event) {
+    console.log('Handling image upload...');
+    
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Check if it's an image
+    if (!file.type.match('image.*')) {
+        alert('Please select an image file (JPEG, PNG, etc.)');
+        return;
+    }
+    
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const img = new Image();
+        
+        img.onload = function() {
+            processUploadedImage(img);
+            imageDataURL = e.target.result; // Store for later use
+        };
+        
+        img.onerror = function() {
+            alert('Error loading image. Please try another image.');
+            document.getElementById('status').textContent = 'Error loading image';
+        };
+        
+        img.src = e.target.result;
+    };
+    
+    reader.onerror = function() {
+        alert('Error reading file. Please try again.');
+        document.getElementById('status').textContent = 'Error reading file';
+    };
+    
+    reader.readAsDataURL(file);
+}
+
+// Process uploaded image
+function processUploadedImage(img) {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const originalCanvas = document.getElementById('originalCanvas');
+    
+    // Hide video
+    video.style.display = 'none';
+    
+    // Store actual dimensions
+    actualWidth = img.width;
+    actualHeight = img.height;
+    
+    console.log('Image dimensions:', actualWidth, 'x', actualHeight);
+    
+    // Set canvas dimensions
+    canvas.width = actualWidth;
+    canvas.height = actualHeight;
+    
+    // Calculate display dimensions
+    const maxWidth = originalCanvas.parentElement.clientWidth - 40; // Account for padding
+    const maxHeight = 300;
+    
+    displayWidth = actualWidth;
+    displayHeight = actualHeight;
+    
+    if (displayWidth > maxWidth || displayHeight > maxHeight) {
+        const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
+        displayWidth = Math.floor(displayWidth * ratio);
+        displayHeight = Math.floor(displayHeight * ratio);
+    }
+    
+    originalCanvas.width = displayWidth;
+    originalCanvas.height = displayHeight;
+    
+    // Calculate display scale
+    displayScale = displayWidth / actualWidth;
+    console.log('Display scale calculated:', displayScale);
+    
+    // Draw to processing canvas
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, actualWidth, actualHeight);
+    
+    // Convert to OpenCV Mat - FIXED: Use proper color conversion
+    const imageData = ctx.getImageData(0, 0, actualWidth, actualHeight);
+    originalImageMat = cv.matFromImageData(imageData);
+    
+    // Convert to proper color space for display
+    cv.cvtColor(originalImageMat, originalImageMat, cv.COLOR_RGBA2RGB);
+    
+    // Draw to display canvas
+    const displayCtx = originalCanvas.getContext('2d');
+    displayCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
+    
+    // Show canvas
+    originalCanvas.style.display = 'block';
+    
+    // Update UI
+    document.getElementById('status').textContent = 'Image loaded. Click on the coin to select reference.';
+    updateUIState();
+    
+    // Reset reference point
+    referencePoint = null;
+    
+    console.log('Image loaded successfully');
+}
+
+// Capture image from camera
+function captureImage() {
+    console.log('Capturing image...');
+    
+    if (!streaming) {
+        alert('Camera is not ready. Please start the camera first.');
+        return;
+    }
+    
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const originalCanvas = document.getElementById('originalCanvas');
+    
+    // Set canvas to video dimensions
+    actualWidth = video.videoWidth;
+    actualHeight = video.videoHeight;
+    
+    console.log('Video dimensions:', actualWidth, 'x', actualHeight);
+    
+    canvas.width = actualWidth;
+    canvas.height = actualHeight;
+    
+    // Calculate display dimensions
+    const maxWidth = originalCanvas.parentElement.clientWidth - 40;
+    const maxHeight = 300;
+    
+    displayWidth = actualWidth;
+    displayHeight = actualHeight;
+    
+    if (displayWidth > maxWidth || displayHeight > maxHeight) {
+        const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
+        displayWidth = Math.floor(displayWidth * ratio);
+        displayHeight = Math.floor(displayHeight * ratio);
+    }
+    
+    originalCanvas.width = displayWidth;
+    originalCanvas.height = displayHeight;
+    
+    // Calculate display scale
+    displayScale = displayWidth / actualWidth;
+    console.log('Display scale calculated:', displayScale);
+    
+    // Draw video frame to canvas
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, actualWidth, actualHeight);
+    
+    // Convert to OpenCV Mat
+    const imageData = ctx.getImageData(0, 0, actualWidth, actualHeight);
+    originalImageMat = cv.matFromImageData(imageData);
+    
+    // Convert to proper color space
+    cv.cvtColor(originalImageMat, originalImageMat, cv.COLOR_RGBA2RGB);
+    
+    // Save as data URL for later use
+    imageDataURL = canvas.toDataURL('image/png');
+    
+    // Draw to display canvas
+    const displayCtx = originalCanvas.getContext('2d');
+    displayCtx.drawImage(video, 0, 0, displayWidth, displayHeight);
+    
+    // Show canvas, hide video
+    video.style.display = 'none';
+    originalCanvas.style.display = 'block';
+    
+    // Update UI
+    document.getElementById('status').textContent = 'Image captured. Click on the coin to select reference.';
+    updateUIState();
+    
+    // Reset reference point
+    referencePoint = null;
+    
+    console.log('Image captured successfully');
+}
+
+// Process image with reference using OpenCV
 async function processImageWithReference() {
     if (!originalImageMat || !referencePoint || isProcessing) {
         console.error('Cannot process: missing data');
@@ -121,89 +633,52 @@ async function processImageWithReference() {
     document.getElementById('status').textContent = 'Processing image...';
     
     try {
-        // Get reference diameter in cm
+        // Get reference diameter
         const refType = document.getElementById('refType').value;
         const customDiameter = parseFloat(document.getElementById('refDiameter').value) || 2.5;
         const referenceDiameterCM = getReferenceDiameter(refType, customDiameter);
         
-        console.log('=== DRAPE CALCULATION START ===');
         console.log('Reference diameter (cm):', referenceDiameterCM);
         console.log('Reference point (actual):', referencePoint.actualX, referencePoint.actualY);
         
-        // FIX 1: Better reference object detection
-        referenceRadiusPixels = detectReferenceObjectImproved(originalImageMat, referencePoint.actualX, referencePoint.actualY);
+        // Detect reference object (coin) and calculate pixel-to-cm ratio
+        const referenceRadiusPixels = detectReferenceObject(originalImageMat, referencePoint.actualX, referencePoint.actualY);
         
         console.log('Detected reference radius (pixels):', referenceRadiusPixels);
         
-        if (referenceRadiusPixels <= 5) { // More reasonable threshold
-            throw new Error('Could not detect reference object. Please click precisely on the center of the coin.');
+        if (referenceRadiusPixels <= 0) {
+            throw new Error('Could not detect reference object. Please click precisely on the coin.');
         }
         
         // Calculate pixel to cm ratio
-        pixelToCmRatio = referenceDiameterCM / (referenceRadiusPixels * 2);
+        const pixelToCmRatio = referenceDiameterCM / (referenceRadiusPixels * 2);
         console.log('Pixel to cm ratio:', pixelToCmRatio);
-        console.log('1 cm =', (1/pixelToCmRatio).toFixed(2), 'pixels');
         
-        // FIX 2: Better drape area detection
-        const drapeResults = detectDrapeAreaImproved(originalImageMat);
-        const drapeAreaPixels = drapeResults.area;
-        const drapeContour = drapeResults.contour;
-        
+        // Detect drape area
+        const drapeAreaPixels = detectDrapeArea(originalImageMat);
         console.log('Drape area (pixels):', drapeAreaPixels);
         
-        // FIX 3: Validate area is reasonable
-        if (drapeAreaPixels < 100) {
-            throw new Error('Detected drape area is too small. Please ensure good lighting and contrast.');
-        }
-        
-        // Calculate actual area in cm²
-        const pixelAreaInCm = pixelToCmRatio * pixelToCmRatio; // cm² per pixel
-        const drapeAreaCm2 = drapeAreaPixels * pixelAreaInCm;
-        
-        console.log('Pixel area in cm²:', pixelAreaInCm.toFixed(6));
-        console.log('Drape area (cm²):', drapeAreaCm2.toFixed(2));
-        
-        // FIX 4: Validate area is physically possible
-        const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value) || 30.0;
-        const maxPossibleArea = Math.PI * Math.pow(fabricDiameter/2, 2) * 1.5; // Allow 50% extra for folds
-        
-        if (drapeAreaCm2 > maxPossibleArea) {
-            console.warn('Detected area seems too large. Possible measurement error.');
-            alert('Warning: Detected area seems larger than physically possible. Please check reference object size.');
-        }
+        // Calculate actual area
+        const drapeAreaCm2 = drapeAreaPixels * pixelToCmRatio * pixelToCmRatio;
+        console.log('Drape area (cm²):', drapeAreaCm2);
         
         // Update results
         document.getElementById('pixelArea').textContent = Math.round(drapeAreaPixels);
         document.getElementById('actualArea').textContent = drapeAreaCm2.toFixed(2);
         
-        // FIX 5: Calculate and validate drape coefficient
+        // Calculate drape coefficient
         const drapeCoefficient = calculateDrapeCoefficient(drapeAreaCm2);
-        
         if (drapeCoefficient !== null) {
-            console.log('Drape coefficient:', drapeCoefficient.toFixed(2) + '%');
-            
-            // Validate drape coefficient
-            if (drapeCoefficient < 0 || drapeCoefficient > 100) {
-                console.warn('Drape coefficient outside expected range:', drapeCoefficient);
-                
-                // Provide debugging info
-                const debugInfo = debugDrapeCalculation(drapeAreaCm2);
-                alert(`Warning: Drape coefficient ${drapeCoefficient.toFixed(2)}% is outside expected range (0-100%).\n\nPossible issues:\n1. Wrong coin size selected?\n2. Clicked wrong spot on coin?\n3. Poor image contrast?\n\nDebug Info:\n${debugInfo}`);
-            }
-            
             document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-            
-            // Store for processed image
-            window.drapeContour = drapeContour;
-            
             addToHistory(drapeAreaCm2, drapeCoefficient);
         }
         
         // Create and display processed image
         createProcessedImage();
         
-        console.log('=== DRAPE CALCULATION COMPLETE ===');
         document.getElementById('status').textContent = 'Analysis complete';
+        
+        console.log('Image processed successfully');
         
     } catch (error) {
         console.error('Error processing image:', error);
@@ -214,271 +689,137 @@ async function processImageWithReference() {
     }
 }
 
-// FIXED: Improved reference object detection
-function detectReferenceObjectImproved(srcMat, clickX, clickY) {
-    // Create working copy
-    let gray = new cv.Mat();
-    cv.cvtColor(srcMat, gray, cv.COLOR_RGB2GRAY);
+// Detect reference object using OpenCV
+function detectReferenceObject(srcMat, clickX, clickY) {
+    // Create a copy for processing
+    let processedMat = new cv.Mat();
+    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
     
-    // Apply blur
-    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+    // Apply Gaussian blur
+    cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
     
-    // Try multiple parameter sets for circle detection
-    const paramSets = [
-        { dp: 1, minDist: 30, param1: 100, param2: 30, minRadius: 10, maxRadius: 100 },
-        { dp: 1, minDist: 20, param1: 80, param2: 25, minRadius: 15, maxRadius: 150 },
-        { dp: 1.2, minDist: 40, param1: 120, param2: 35, minRadius: 8, maxRadius: 80 }
-    ];
-    
-    let bestRadius = 0;
-    let bestDistance = Infinity;
-    
-    for (const params of paramSets) {
-        let circles = new cv.Mat();
-        
-        cv.HoughCircles(gray, circles, cv.HOUGH_GRADIENT, 
-            params.dp, params.minDist, params.param1, 
-            params.param2, params.minRadius, params.maxRadius
-        );
-        
-        for (let i = 0; i < circles.cols; i++) {
-            const circle = circles.data32F.slice(i * 3, (i + 1) * 3);
-            const x = circle[0];
-            const y = circle[1];
-            const radius = circle[2];
-            
-            const distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
-            
-            // Prefer circles close to click point
-            if (distance < bestDistance && distance < 50) { // Must be within 50 pixels
-                bestDistance = distance;
-                bestRadius = radius;
-            }
-        }
-        
-        circles.delete();
-    }
-    
-    // If no circle detected, estimate based on typical coin size
-    if (bestRadius <= 0) {
-        console.log('No circle detected, estimating from typical coin size');
-        
-        // Typical coin in image: 2.5cm coin at 10cm distance = ~100px diameter
-        // Estimate based on image dimensions
-        const estimatedRadius = Math.min(actualWidth, actualHeight) * 0.05; // 5% of image dimension
-        bestRadius = Math.max(20, Math.min(estimatedRadius, 100)); // Between 20-100 pixels
-        
-        console.log('Estimated radius:', bestRadius);
-    }
-    
-    gray.delete();
-    
-    console.log('Selected reference radius:', bestRadius, 'pixels, distance from click:', bestDistance);
-    return bestRadius;
-}
-
-// FIXED: Improved drape area detection
-function detectDrapeAreaImproved(srcMat) {
-    let gray = new cv.Mat();
-    cv.cvtColor(srcMat, gray, cv.COLOR_RGB2GRAY);
-    
-    // Apply Gaussian blur to reduce noise
-    cv.GaussianBlur(gray, gray, new cv.Size(7, 7), 0);
-    
-    // Use adaptive threshold for better shadow detection
-    let binary = new cv.Mat();
-    cv.adaptiveThreshold(gray, binary, 
-        255, // max value
-        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv.THRESH_BINARY_INV, // Invert to get dark areas
-        21, // block size (odd number)
-        10  // constant subtracted from mean
+    // Detect circles using Hough Transform
+    let circles = new cv.Mat();
+    cv.HoughCircles(processedMat, circles, cv.HOUGH_GRADIENT, 
+        1, // dp
+        30, // minDist (increased for better detection)
+        100, // param1
+        30, // param2 (lowered for better detection)
+        20, // minRadius
+        150 // maxRadius
     );
     
-    // Apply morphological operations to clean up
-    let kernel = cv.Mat.ones(5, 5, cv.CV_8U);
-    cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
-    cv.morphologyEx(binary, binary, cv.MORPH_OPEN, kernel);
+    console.log('Circles found:', circles.cols);
+    
+    let detectedRadius = 0;
+    let minDistance = Infinity;
+    
+    // Find the circle closest to the click point
+    for (let i = 0; i < circles.cols; i++) {
+        let circle = circles.data32F.slice(i * 3, (i + 1) * 3);
+        let x = circle[0];
+        let y = circle[1];
+        let radius = circle[2];
+        
+        // Calculate distance from click point
+        let distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
+        
+        console.log(`Circle ${i}: x=${x.toFixed(1)}, y=${y.toFixed(1)}, r=${radius.toFixed(1)}, dist=${distance.toFixed(1)}`);
+        
+        if (distance < minDistance) {
+            minDistance = distance;
+            detectedRadius = radius;
+        }
+    }
+    
+    // Clean up
+    processedMat.delete();
+    circles.delete();
+    
+    // If no circle detected or too far from click, use a reasonable default
+    if (detectedRadius <= 0 || minDistance > 100) {
+        console.log('No circle detected near click, using default radius');
+        return 40; // Default reasonable radius in pixels
+    }
+    
+    console.log('Selected circle radius:', detectedRadius, 'pixels, distance:', minDistance);
+    return detectedRadius;
+}
+
+// Detect drape area using OpenCV
+function detectDrapeArea(srcMat) {
+    // Create a copy for processing
+    let processedMat = new cv.Mat();
+    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
+    
+    // Apply Gaussian blur
+    cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
+    
+    // Apply adaptive threshold to highlight dark areas (drape shadow)
+    let thresholdMat = new cv.Mat();
+    cv.adaptiveThreshold(processedMat, thresholdMat, 
+        255, // max value
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY_INV,
+        11, // block size
+        2 // constant
+    );
     
     // Find contours
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
-    cv.findContours(binary, contours, hierarchy, 
+    cv.findContours(thresholdMat, contours, hierarchy, 
         cv.RETR_EXTERNAL, 
         cv.CHAIN_APPROX_SIMPLE
     );
     
     let maxArea = 0;
     let largestContour = null;
-    let imageCenterX = srcMat.cols / 2;
-    let imageCenterY = srcMat.rows / 2;
     
-    // Find the largest contour near center (likely the drape)
+    // Find the largest contour (likely the drape area)
     for (let i = 0; i < contours.size(); i++) {
         let contour = contours.get(i);
         let area = cv.contourArea(contour);
         
-        // Get contour center
-        let moments = cv.moments(contour);
-        if (moments.m00 > 0) {
-            let centerX = moments.m10 / moments.m00;
-            let centerY = moments.m01 / moments.m00;
-            
-            // Distance from image center
-            let distance = Math.sqrt(
-                Math.pow(centerX - imageCenterX, 2) + 
-                Math.pow(centerY - imageCenterY, 2)
-            );
-            
-            // Prefer contours near center and with reasonable size
-            if (area > maxArea && distance < Math.min(srcMat.cols, srcMat.rows) * 0.4) {
-                maxArea = area;
-                largestContour = contour.clone();
+        if (area > maxArea) {
+            maxArea = area;
+            // Store for processed image
+            if (largestContour) {
+                largestContour.delete();
             }
+            largestContour = contour.clone();
         }
+    }
+    
+    // Store for processed image
+    if (largestContour) {
+        if (window.largestContour) {
+            window.largestContour.delete();
+        }
+        window.largestContour = largestContour;
+    } else {
+        window.largestContour = null;
     }
     
     // Clean up
-    gray.delete();
-    binary.delete();
-    kernel.delete();
+    processedMat.delete();
+    thresholdMat.delete();
     hierarchy.delete();
     
-    // Store contour for display
-    if (largestContour) {
-        if (window.drapeContour) {
-            window.drapeContour.delete();
-        }
-        window.drapeContour = largestContour;
-    }
-    
-    return {
-        area: maxArea,
-        contour: largestContour
-    };
+    return maxArea;
 }
 
-// FIXED: Calculate drape coefficient with proper validation
-function calculateDrapeCoefficient(measuredArea) {
-    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value) || 18.0;
-    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value) || 30.0;
-    
-    console.log('\n=== DRAPE COEFFICIENT CALCULATION ===');
-    console.log('Inputs:', {
-        measuredArea: measuredArea.toFixed(2) + ' cm²',
-        diskDiameter: diskDiameter + ' cm',
-        fabricDiameter: fabricDiameter + ' cm'
-    });
-    
-    // Validation
-    if (isNaN(diskDiameter) || diskDiameter <= 0) {
-        alert('Please enter a valid positive diameter for the support disk');
-        return null;
-    }
-    
-    if (isNaN(fabricDiameter) || fabricDiameter <= 0) {
-        alert('Please enter a valid positive diameter for the fabric sample');
-        return null;
-    }
-    
-    if (fabricDiameter <= diskDiameter) {
-        alert(`Fabric diameter (${fabricDiameter} cm) must be larger than disk diameter (${diskDiameter} cm)`);
-        return null;
-    }
-    
-    if (isNaN(measuredArea) || measuredArea <= 0) {
-        alert('Invalid measured area. Please capture and analyze an image first.');
-        return null;
-    }
-    
-    // Calculate areas
-    const diskRadius = diskDiameter / 2;
-    const fabricRadius = fabricDiameter / 2;
-    
-    const diskArea = Math.PI * Math.pow(diskRadius, 2);
-    const fabricArea = Math.PI * Math.pow(fabricRadius, 2);
-    
-    console.log('Calculated areas:', {
-        diskArea: diskArea.toFixed(2) + ' cm²',
-        fabricArea: fabricArea.toFixed(2) + ' cm²'
-    });
-    
-    // Calculate drape coefficient
-    const numerator = measuredArea - diskArea;
-    const denominator = fabricArea - diskArea;
-    
-    console.log('Calculation:', {
-        numerator: numerator.toFixed(2),
-        denominator: denominator.toFixed(2)
-    });
-    
-    if (denominator <= 0) {
-        alert('Calculation error: Fabric area must be larger than disk area');
-        return null;
-    }
-    
-    const drapeCoefficient = (numerator / denominator) * 100;
-    
-    console.log('Result:', drapeCoefficient.toFixed(2) + '%');
-    
-    // Provide detailed feedback if result is unreasonable
-    if (drapeCoefficient > 100 || drapeCoefficient < 0) {
-        console.warn('UNREASONABLE RESULT - Possible errors:');
-        console.warn('1. Wrong reference object size?');
-        console.warn('2. Incorrect pixel-to-cm ratio:', pixelToCmRatio);
-        console.warn('3. Detected wrong area?');
-        console.warn('4. Disk/Fabric diameters incorrect?');
-    }
-    
-    return drapeCoefficient;
-}
-
-// Debug function to identify calculation issues
-function debugDrapeCalculation(measuredArea) {
-    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value) || 18.0;
-    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value) || 30.0;
-    
-    const diskArea = Math.PI * Math.pow(diskDiameter/2, 2);
-    const fabricArea = Math.PI * Math.pow(fabricDiameter/2, 2);
-    
-    let debugInfo = '';
-    debugInfo += `Measured Area: ${measuredArea.toFixed(2)} cm²\n`;
-    debugInfo += `Disk Area (π×(${diskDiameter/2})²): ${diskArea.toFixed(2)} cm²\n`;
-    debugInfo += `Fabric Area (π×(${fabricDiameter/2})²): ${fabricArea.toFixed(2)} cm²\n`;
-    debugInfo += `Pixel-to-cm ratio: ${pixelToCmRatio.toFixed(6)}\n`;
-    debugInfo += `1 cm = ${(1/pixelToCmRatio).toFixed(2)} pixels\n`;
-    debugInfo += `Reference radius: ${referenceRadiusPixels.toFixed(2)} pixels\n`;
-    
-    // Check if measured area is reasonable
-    if (measuredArea < diskArea) {
-        debugInfo += `\n⚠️ ERROR: Measured area (${measuredArea.toFixed(2)} cm²) is LESS than disk area (${diskArea.toFixed(2)} cm²)\n`;
-        debugInfo += 'This means the fabric appears smaller than the disk, which is impossible.\n';
-        debugInfo += 'Possible causes:\n';
-        debugInfo += '1. Reference coin size is wrong\n';
-        debugInfo += '2. Clicked wrong spot on coin\n';
-        debugInfo += '3. Image is not properly aligned\n';
-    }
-    
-    if (measuredArea > fabricArea * 2) {
-        debugInfo += `\n⚠️ ERROR: Measured area (${measuredArea.toFixed(2)} cm²) is MORE than double fabric area (${fabricArea.toFixed(2)} cm²)\n`;
-        debugInfo += 'The draped area cannot be larger than the original fabric.\n';
-        debugInfo += 'Possible causes:\n';
-        debugInfo += '1. Reference coin is too small in image\n';
-        debugInfo += '2. Pixel-to-cm ratio calculation is wrong\n';
-        debugInfo += '3. Detected area includes background\n';
-    }
-    
-    return debugInfo;
-}
-
-// Create processed image with measurement overlay
+// FIXED: Create processed image with highlights
 function createProcessedImage() {
-    if (!originalImageMat || !referencePoint) return;
+    if (!originalImageMat || !referencePoint) {
+        console.error('Cannot create processed image: missing data');
+        return;
+    }
     
     const processedCanvas = document.getElementById('processedCanvas');
     const displayCtx = processedCanvas.getContext('2d');
     
-    // Set canvas dimensions
+    // Set canvas dimensions to match display dimensions
     processedCanvas.width = displayWidth;
     processedCanvas.height = displayHeight;
     
@@ -486,33 +827,61 @@ function createProcessedImage() {
     displayCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
     
     try {
-        // Draw the original image
-        const originalCanvas = document.getElementById('originalCanvas');
-        displayCtx.drawImage(originalCanvas, 0, 0, displayWidth, displayHeight);
+        // Create a copy of the original image for display
+        let displayMat = new cv.Mat();
         
-        // Highlight drape area if available
-        if (window.drapeContour) {
+        // Resize for display
+        cv.resize(originalImageMat, displayMat, 
+            new cv.Size(displayWidth, displayHeight),
+            0, 0, cv.INTER_LINEAR
+        );
+        
+        // Convert to RGBA for canvas
+        cv.cvtColor(displayMat, displayMat, cv.COLOR_RGB2RGBA);
+        
+        // FIXED: Create ImageData with correct dimensions
+        const imageData = new ImageData(
+            new Uint8ClampedArray(displayMat.data),
+            displayMat.cols,
+            displayMat.rows
+        );
+        
+        console.log('Creating ImageData:', {
+            dataLength: displayMat.data.length,
+            expected: displayMat.cols * displayMat.rows * 4,
+            cols: displayMat.cols,
+            rows: displayMat.rows
+        });
+        
+        // Draw the base image
+        displayCtx.putImageData(imageData, 0, 0);
+        
+        // Highlight drape area if contour is available
+        if (window.largestContour) {
             displayCtx.save();
             
-            const contour = window.drapeContour;
+            // Scale the contour points to display dimensions
+            const contour = window.largestContour;
             const scaleX = displayWidth / actualWidth;
             const scaleY = displayHeight / actualHeight;
             
             displayCtx.beginPath();
             
-            // Draw contour
+            // Convert contour points to path
+            let firstPoint = true;
             for (let i = 0; i < contour.data32S.length; i += 2) {
                 const x = contour.data32S[i] * scaleX;
                 const y = contour.data32S[i + 1] * scaleY;
                 
-                if (i === 0) {
+                if (firstPoint) {
                     displayCtx.moveTo(x, y);
+                    firstPoint = false;
                 } else {
                     displayCtx.lineTo(x, y);
                 }
             }
             
-            // Close path
+            // Close the path
             if (contour.data32S.length > 0) {
                 const firstX = contour.data32S[0] * scaleX;
                 const firstY = contour.data32S[1] * scaleY;
@@ -521,13 +890,13 @@ function createProcessedImage() {
             
             displayCtx.closePath();
             
-            // Fill with semi-transparent color
+            // Fill with semi-transparent red
             displayCtx.fillStyle = 'rgba(255, 0, 0, 0.3)';
             displayCtx.fill();
             
             // Draw contour outline
             displayCtx.strokeStyle = '#ff0000';
-            displayCtx.lineWidth = 2;
+            displayCtx.lineWidth = 3;
             displayCtx.stroke();
             
             displayCtx.restore();
@@ -539,24 +908,51 @@ function createProcessedImage() {
         const displayX = referencePoint.displayX;
         const displayY = referencePoint.displayY;
         
-        // Draw reference circle with actual size
-        const referenceRadiusDisplay = referenceRadiusPixels * displayScale;
+        // Draw reference point circle
         displayCtx.beginPath();
-        displayCtx.arc(displayX, displayY, referenceRadiusDisplay, 0, Math.PI * 2);
+        displayCtx.arc(displayX, displayY, 12, 0, Math.PI * 2);
+        displayCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+        displayCtx.fill();
         displayCtx.strokeStyle = '#00ff00';
         displayCtx.lineWidth = 2;
         displayCtx.stroke();
         
-        // Draw center marker
+        // Draw crosshair
+        displayCtx.beginPath();
+        displayCtx.moveTo(displayX - 10, displayY);
+        displayCtx.lineTo(displayX + 10, displayY);
+        displayCtx.moveTo(displayX, displayY - 10);
+        displayCtx.lineTo(displayX, displayY + 10);
+        displayCtx.strokeStyle = '#00ff00';
+        displayCtx.lineWidth = 2;
+        displayCtx.stroke();
+        
+        // Draw center dot
         displayCtx.beginPath();
         displayCtx.arc(displayX, displayY, 3, 0, Math.PI * 2);
         displayCtx.fillStyle = '#00ff00';
         displayCtx.fill();
         
-        // Add measurement info
+        // Add label
+        displayCtx.font = 'bold 12px Arial';
+        const text = 'REF';
+        const textWidth = displayCtx.measureText(text).width;
+        
+        // Draw text background
+        displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        displayCtx.fillRect(displayX - textWidth/2 - 5, displayY - 35, textWidth + 10, 18);
+        
+        // Draw text
+        displayCtx.fillStyle = '#ffffff';
+        displayCtx.textAlign = 'center';
+        displayCtx.fillText(text, displayX, displayY - 25);
+        
+        displayCtx.restore();
+        
+        // Add measurement information
         displayCtx.save();
         displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        displayCtx.fillRect(10, 10, 300, 100);
+        displayCtx.fillRect(10, 10, 250, 80);
         
         displayCtx.fillStyle = 'white';
         displayCtx.font = 'bold 14px Arial';
@@ -567,20 +963,40 @@ function createProcessedImage() {
         const drape = document.getElementById('drapeCoefficient').textContent;
         displayCtx.fillText(`Area: ${area} cm²`, 20, 50);
         displayCtx.fillText(`Drape: ${drape}`, 20, 70);
-        displayCtx.fillText(`Scale: 1 cm = ${(1/pixelToCmRatio).toFixed(1)} px`, 20, 90);
         
         displayCtx.restore();
         
         // Show processed canvas
         processedCanvas.style.display = 'block';
         
+        // Clean up
+        displayMat.delete();
+        
     } catch (error) {
         console.error('Error creating processed image:', error);
+        
+        // Fallback: Just draw the original image
+        const originalCanvas = document.getElementById('originalCanvas');
+        displayCtx.drawImage(originalCanvas, 0, 0, displayWidth, displayHeight);
+        
+        // Add error message
+        displayCtx.save();
+        displayCtx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+        displayCtx.fillRect(10, 10, 300, 60);
+        
+        displayCtx.fillStyle = 'white';
+        displayCtx.font = 'bold 14px Arial';
+        displayCtx.fillText('Error Processing Image', 20, 30);
+        displayCtx.font = '12px Arial';
+        displayCtx.fillText('Results are still available', 20, 50);
+        
+        displayCtx.restore();
+        
         processedCanvas.style.display = 'block';
     }
 }
 
-// Helper function to get reference diameter
+// Get reference diameter based on type
 function getReferenceDiameter(refType, customDiameter) {
     switch(refType) {
         case 'coin2':
@@ -590,7 +1006,7 @@ function getReferenceDiameter(refType, customDiameter) {
         case 'custom':
             return parseFloat(customDiameter) || 2.5;
         default:
-            return 2.5;
+            return 2.5; // Default to 2 Rupee coin
     }
 }
 
@@ -854,462 +1270,6 @@ function resetApp() {
     
     alert('Application reset');
 }
-// ============================================
-// DIAGNOSTIC AND CALIBRATION FUNCTIONS
-// ============================================
-
-// Setup diagnostic event listeners - Call this from initializeApp()
-function setupDiagnosticListeners() {
-    console.log('Setting up diagnostic listeners...');
-    
-    // Run Diagnostics button
-    const runDiagnosticsBtn = document.getElementById('runDiagnostics');
-    if (runDiagnosticsBtn) {
-        runDiagnosticsBtn.addEventListener('click', runDiagnostics);
-        console.log('Run Diagnostics button listener added');
-    }
-    
-    // Calibrate Scale button
-    const calibrateScaleBtn = document.getElementById('calibrateScale');
-    if (calibrateScaleBtn) {
-        calibrateScaleBtn.addEventListener('click', calibrateScale);
-        console.log('Calibrate Scale button listener added');
-    }
-    
-    // Show Debug Info button
-    const showDebugInfoBtn = document.getElementById('showDebugInfo');
-    if (showDebugInfoBtn) {
-        showDebugInfoBtn.addEventListener('click', showDebugInfo);
-        console.log('Show Debug Info button listener added');
-    }
-    
-    // Update estimated diameter when manual scale changes
-    const manualScaleInput = document.getElementById('manualScale');
-    if (manualScaleInput) {
-        manualScaleInput.addEventListener('input', updateEstimatedDiameter);
-    }
-}
-
-// Update estimated coin diameter based on manual scale
-function updateEstimatedDiameter() {
-    const manualScale = parseFloat(document.getElementById('manualScale').value);
-    if (!isNaN(manualScale) && manualScale > 0) {
-        // Calculate: coin diameter in pixels = 2.5cm / scale
-        const estimatedPixels = 2.5 / manualScale;
-        document.getElementById('estimatedDiameter').value = Math.round(estimatedPixels);
-    }
-}
-
-// Run comprehensive diagnostics
-function runDiagnostics() {
-    if (!originalImageMat || !referencePoint) {
-        alert('Please capture an image and select a reference point first.');
-        return;
-    }
-    
-    console.log('=== RUNNING COMPREHENSIVE DIAGNOSTICS ===');
-    
-    let diagnosticReport = '🔍 DIAGNOSTIC REPORT\n\n';
-    let issuesFound = 0;
-    
-    // 1. Check reference point
-    diagnosticReport += '1. REFERENCE POINT ANALYSIS:\n';
-    diagnosticReport += `   • Click position: (${referencePoint.actualX}, ${referencePoint.actualY})\n`;
-    diagnosticReport += `   • Image dimensions: ${actualWidth} × ${actualHeight} px\n`;
-    
-    if (referencePoint.actualX < 10 || referencePoint.actualX > actualWidth - 10 || 
-        referencePoint.actualY < 10 || referencePoint.actualY > actualHeight - 10) {
-        diagnosticReport += '   ⚠️ WARNING: Click too close to image edge\n';
-        issuesFound++;
-    } else {
-        diagnosticReport += '   ✅ OK: Click well within image bounds\n';
-    }
-    
-    // 2. Check scale calculation
-    diagnosticReport += '\n2. SCALE CALCULATION:\n';
-    diagnosticReport += `   • Reference radius: ${referenceRadiusPixels.toFixed(1)} px\n`;
-    diagnosticReport += `   • Pixel-to-cm ratio: ${pixelToCmRatio.toFixed(6)}\n`;
-    diagnosticReport += `   • 1 cm = ${(1/pixelToCmRatio).toFixed(1)} pixels\n`;
-    
-    // Typical values: 2.5cm coin = ~100px diameter = ~50px radius
-    // So pixelToCmRatio should be ~0.025
-    const expectedRatio = 0.025; // 2.5cm / 100px
-    const ratioDiff = Math.abs(pixelToCmRatio - expectedRatio) / expectedRatio;
-    
-    if (ratioDiff > 0.5) { // More than 50% off
-        diagnosticReport += `   ❌ PROBLEM: Scale is ${(ratioDiff * 100).toFixed(0)}% off expected value\n`;
-        diagnosticReport += `   Expected: ~0.025 cm/px (2.5cm coin = 100px diameter)\n`;
-        diagnosticReport += `   Current: ${pixelToCmRatio.toFixed(6)} cm/px\n`;
-        issuesFound++;
-    } else {
-        diagnosticReport += '   ✅ OK: Scale is reasonable\n';
-    }
-    
-    // 3. Check measured area
-    const measuredAreaText = document.getElementById('actualArea').textContent;
-    const measuredArea = parseFloat(measuredAreaText) || 0;
-    const pixelArea = parseFloat(document.getElementById('pixelArea').textContent) || 0;
-    
-    diagnosticReport += '\n3. AREA MEASUREMENT:\n';
-    diagnosticReport += `   • Pixel area: ${pixelArea.toLocaleString()} px²\n`;
-    diagnosticReport += `   • Actual area: ${measuredArea.toFixed(2)} cm²\n`;
-    
-    // 4. Check against expected ranges
-    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value) || 18.0;
-    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value) || 30.0;
-    
-    const diskArea = Math.PI * Math.pow(diskDiameter/2, 2);
-    const fabricArea = Math.PI * Math.pow(fabricDiameter/2, 2);
-    
-    diagnosticReport += '\n4. EXPECTED RANGES:\n';
-    diagnosticReport += `   • Disk area (${diskDiameter}cm): ${diskArea.toFixed(2)} cm²\n`;
-    diagnosticReport += `   • Fabric area (${fabricDiameter}cm): ${fabricArea.toFixed(2)} cm²\n`;
-    diagnosticReport += `   • Drape should be between: ${diskArea.toFixed(2)} - ${fabricArea.toFixed(2)} cm²\n`;
-    
-    if (measuredArea < diskArea * 0.9) {
-        diagnosticReport += '   ❌ PROBLEM: Area too small (less than disk)\n';
-        diagnosticReport += '   Possible: Wrong coin size or bad reference detection\n';
-        issuesFound++;
-    } else if (measuredArea > fabricArea * 1.5) {
-        diagnosticReport += '   ❌ PROBLEM: Area too large (more than fabric)\n';
-        diagnosticReport += '   Possible: Scale too small or includes background\n';
-        issuesFound++;
-    } else if (measuredArea >= diskArea && measuredArea <= fabricArea) {
-        diagnosticReport += '   ✅ OK: Area within reasonable range\n';
-    } else {
-        diagnosticReport += '   ⚠️ WARNING: Area slightly outside expected range\n';
-    }
-    
-    // 5. Check drape coefficient
-    const drapeText = document.getElementById('drapeCoefficient').textContent;
-    const drapeMatch = drapeText.match(/(\d+\.?\d*)/);
-    const drapeValue = drapeMatch ? parseFloat(drapeMatch[1]) : 0;
-    
-    diagnosticReport += '\n5. DRAPE COEFFICIENT:\n';
-    diagnosticReport += `   • Current value: ${drapeValue.toFixed(2)}%\n`;
-    
-    if (drapeValue < 0 || drapeValue > 100) {
-        diagnosticReport += `   ❌ PROBLEM: Value ${drapeValue.toFixed(2)}% outside 0-100% range\n`;
-        issuesFound++;
-    } else if (drapeValue >= 0 && drapeValue <= 100) {
-        diagnosticReport += '   ✅ OK: Value within 0-100% range\n';
-    }
-    
-    // 6. Recommendations
-    diagnosticReport += '\n6. RECOMMENDATIONS:\n';
-    
-    if (issuesFound === 0) {
-        diagnosticReport += '   ✅ All checks passed! Measurements appear correct.\n';
-    } else {
-        diagnosticReport += `   Found ${issuesFound} potential issue(s):\n`;
-        
-        if (ratioDiff > 0.5) {
-            diagnosticReport += '   • Try manual scale calibration\n';
-            diagnosticReport += '   • Ensure you clicked the CENTER of the coin\n';
-            diagnosticReport += '   • Verify coin size in settings (2.5cm for Indian 2 Rupee)\n';
-        }
-        
-        if (measuredArea < diskArea * 0.9) {
-            diagnosticReport += '   • Coin may be detected as too large\n';
-            diagnosticReport += '   • Try clicking closer to coin center\n';
-            diagnosticReport += '   • Use smaller manual scale value\n';
-        }
-        
-        if (measuredArea > fabricArea * 1.5) {
-            diagnosticReport += '   • Coin may be detected as too small\n';
-            diagnosticReport += '   • Try clicking exactly on coin edge\n';
-            diagnosticReport += '   • Use larger manual scale value\n';
-        }
-    }
-    
-    // Show report in alert and console
-    console.log(diagnosticReport);
-    
-    // Create a nicer display
-    showDiagnosticReport(diagnosticReport, issuesFound);
-}
-
-// Show diagnostic report in a modal
-function showDiagnosticReport(report, issuesFound) {
-    // Create modal
-    const modal = document.createElement('div');
-    modal.id = 'diagnosticModal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 2000;
-        padding: 20px;
-    `;
-    
-    // Modal content
-    const modalContent = document.createElement('div');
-    modalContent.style.cssText = `
-        background: white;
-        border-radius: 10px;
-        padding: 25px;
-        max-width: 600px;
-        max-height: 80vh;
-        overflow-y: auto;
-        box-shadow: 0 5px 30px rgba(0,0,0,0.3);
-    `;
-    
-    // Header
-    const header = document.createElement('div');
-    header.style.cssText = `
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 15px;
-        border-bottom: 2px solid #eee;
-    `;
-    
-    const title = document.createElement('h3');
-    title.style.margin = '0';
-    title.style.color = issuesFound > 0 ? '#e74c3c' : '#2ecc71';
-    title.innerHTML = `<i class="fas fa-stethoscope"></i> Diagnostic Results ${issuesFound > 0 ? ' - Issues Found' : ' - All Good!'}`;
-    
-    const closeBtn = document.createElement('button');
-    closeBtn.innerHTML = '<i class="fas fa-times"></i>';
-    closeBtn.style.cssText = `
-        background: none;
-        border: none;
-        font-size: 20px;
-        cursor: pointer;
-        color: #7f8c8d;
-    `;
-    closeBtn.onclick = () => {
-        document.body.removeChild(modal);
-    };
-    
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    
-    // Report content
-    const content = document.createElement('div');
-    content.style.cssText = `
-        font-family: 'Courier New', monospace;
-        font-size: 13px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        background: #f8f9fa;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        max-height: 400px;
-        overflow-y: auto;
-    `;
-    content.textContent = report;
-    
-    // Actions
-    const actions = document.createElement('div');
-    actions.style.cssText = `
-        display: flex;
-        gap: 10px;
-        margin-top: 20px;
-    `;
-    
-    const calibrateBtn = document.createElement('button');
-    calibrateBtn.innerHTML = '<i class="fas fa-ruler"></i> Calibrate Scale';
-    calibrateBtn.className = 'btn btn-warning';
-    calibrateBtn.onclick = () => {
-        document.body.removeChild(modal);
-        showCalibrationHelp();
-    };
-    
-    const closeButton = document.createElement('button');
-    closeButton.innerHTML = '<i class="fas fa-check"></i> Close';
-    closeButton.className = 'btn btn-primary';
-    closeButton.onclick = () => {
-        document.body.removeChild(modal);
-    };
-    
-    actions.appendChild(calibrateBtn);
-    actions.appendChild(closeButton);
-    
-    // Assemble modal
-    modalContent.appendChild(header);
-    modalContent.appendChild(content);
-    modalContent.appendChild(actions);
-    modal.appendChild(modalContent);
-    
-    // Add to page
-    document.body.appendChild(modal);
-    
-    // Close on ESC key
-    modal.onkeydown = (e) => {
-        if (e.key === 'Escape') {
-            document.body.removeChild(modal);
-        }
-    };
-    modal.focus();
-}
-
-// Show calibration help
-function showCalibrationHelp() {
-    const helpText = `📏 CALIBRATION GUIDE
-
-If drape coefficient is >100%, follow these steps:
-
-STEP 1: Check Coin Detection
-• The green circle should match the coin size
-• If circle is too small/big, scale is wrong
-
-STEP 2: Manual Calibration
-1. Measure coin diameter in image (pixels):
-   - Right-click image → "Inspect"
-   - Use ruler tool or count pixels
-
-2. Calculate correct scale:
-   Scale = Coin Diameter (cm) ÷ Pixel Diameter
-
-3. Enter scale in "Manual Scale" field
-   Example: 2.5cm coin = 100 pixels
-   Scale = 2.5 ÷ 100 = 0.025
-
-STEP 3: Apply and Retest
-1. Click "Apply Manual Scale"
-2. Click coin again to recalculate
-3. Check if drape coefficient is now 0-100%
-
-Common Scale Values:
-• 2.5cm coin = ~100px → 0.025
-• 2.5cm coin = ~80px  → 0.03125
-• 2.5cm coin = ~120px → 0.02083
-
-Need help? Try these test scales: 0.020, 0.025, 0.030`;
-
-    alert(helpText);
-    
-    // Focus on manual scale input
-    const manualScaleInput = document.getElementById('manualScale');
-    if (manualScaleInput) {
-        manualScaleInput.focus();
-        manualScaleInput.select();
-    }
-}
-
-// Apply manual scale calibration
-function calibrateScale() {
-    const manualScaleInput = document.getElementById('manualScale');
-    const manualScale = parseFloat(manualScaleInput.value);
-    
-    if (isNaN(manualScale) || manualScale <= 0 || manualScale > 1) {
-        alert('Please enter a valid scale between 0.001 and 1.0');
-        manualScaleInput.focus();
-        manualScaleInput.select();
-        return;
-    }
-    
-    // Update global scale
-    pixelToCmRatio = manualScale;
-    
-    // Update estimated diameter display
-    updateEstimatedDiameter();
-    
-    // If we have a measured pixel area, recalculate
-    const pixelAreaText = document.getElementById('pixelArea').textContent;
-    if (pixelAreaText !== '--') {
-        const pixelArea = parseFloat(pixelAreaText);
-        if (!isNaN(pixelArea)) {
-            // Recalculate area
-            const newArea = pixelArea * manualScale * manualScale;
-            document.getElementById('actualArea').textContent = newArea.toFixed(2);
-            
-            // Recalculate drape coefficient
-            const drapeCoefficient = calculateDrapeCoefficient(newArea);
-            if (drapeCoefficient !== null) {
-                document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-                
-                // Update history with new calculation
-                const historyIndex = measurementHistory.findIndex(m => m.area === pixelAreaText);
-                if (historyIndex !== -1) {
-                    measurementHistory[historyIndex].area = newArea.toFixed(2);
-                    measurementHistory[historyIndex].drapePercent = drapeCoefficient.toFixed(2);
-                    updateHistoryTable();
-                    saveHistory();
-                }
-            }
-            
-            alert(`Scale calibrated to: ${manualScale.toFixed(6)} cm/pixel\n1 cm = ${(1/manualScale).toFixed(1)} pixels\nAreas recalculated.`);
-        }
-    } else {
-        alert(`Scale set to: ${manualScale.toFixed(6)} cm/pixel\n1 cm = ${(1/manualScale).toFixed(1)} pixels\nCapture a new image to use this scale.`);
-    }
-}
-
-// Show debug information
-function showDebugInfo() {
-    let debugInfo = '🛠️ DEBUG INFORMATION\n\n';
-    
-    debugInfo += 'Image Properties:\n';
-    debugInfo += `• Original dimensions: ${actualWidth} × ${actualHeight} px\n`;
-    debugInfo += `• Display dimensions: ${displayWidth} × ${displayHeight} px\n`;
-    debugInfo += `• Display scale: ${displayScale.toFixed(4)}\n\n`;
-    
-    debugInfo += 'Reference Information:\n';
-    if (referencePoint) {
-        debugInfo += `• Click position: (${referencePoint.displayX}, ${referencePoint.displayY}) display\n`;
-        debugInfo += `• Actual position: (${referencePoint.actualX}, ${referencePoint.actualY}) px\n`;
-        debugInfo += `• Reference radius: ${referenceRadiusPixels.toFixed(1)} px\n`;
-    } else {
-        debugInfo += '• No reference point selected\n';
-    }
-    
-    debugInfo += `• Pixel-to-cm ratio: ${pixelToCmRatio.toFixed(6)}\n`;
-    debugInfo += `• 1 pixel = ${(pixelToCmRatio * 10).toFixed(3)} mm\n\n`;
-    
-    debugInfo += 'Current Measurements:\n';
-    debugInfo += `• Pixel area: ${document.getElementById('pixelArea').textContent}\n`;
-    debugInfo += `• Actual area: ${document.getElementById('actualArea').textContent}\n`;
-    debugInfo += `• Drape coefficient: ${document.getElementById('drapeCoefficient').textContent}\n\n`;
-    
-    debugInfo += 'Settings:\n';
-    debugInfo += `• Disk diameter: ${document.getElementById('diskDiameter').value} cm\n`;
-    debugInfo += `• Fabric diameter: ${document.getElementById('fabricDiameter').value} cm\n`;
-    debugInfo += `• Reference type: ${document.getElementById('refType').value}\n`;
-    
-    // Show in console
-    console.log(debugInfo);
-    
-    // Show to user
-    const debugModal = document.createElement('div');
-    debugModal.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 5px 30px rgba(0,0,0,0.3);
-        z-index: 2000;
-        max-width: 500px;
-        max-height: 70vh;
-        overflow-y: auto;
-    `;
-    
-    debugModal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h4 style="margin: 0; color: #3498db;"><i class="fas fa-bug"></i> Debug Information</h4>
-            <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #7f8c8d;">×</button>
-        </div>
-        <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; font-size: 12px; line-height: 1.4; white-space: pre-wrap; max-height: 400px; overflow-y: auto;">${debugInfo}</pre>
-        <div style="margin-top: 15px; text-align: center;">
-            <button onclick="this.parentElement.parentElement.remove()" class="btn btn-primary" style="padding: 8px 20px;">Close</button>
-        </div>
-    `;
-    
-    document.body.appendChild(debugModal);
-}
-
 
 // Initialize when page loads (fallback)
 if (document.readyState === 'loading') {
