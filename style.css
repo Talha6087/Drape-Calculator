@@ -683,3 +683,118 @@ tbody tr:hover {
     opacity: 0.5;
     cursor: not-allowed;
 }
+/* Add these styles to your existing style.css */
+
+/* Enhanced click feedback */
+.click-feedback {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 255, 0, 0.8);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: clickPulse 0.6s ease-out;
+    z-index: 100;
+    transform: translate(-50%, -50%);
+}
+
+@keyframes clickPulse {
+    0% {
+        width: 20px;
+        height: 20px;
+        opacity: 1;
+        border-width: 2px;
+    }
+    50% {
+        width: 60px;
+        height: 60px;
+        opacity: 0.5;
+        border-width: 1px;
+    }
+    100% {
+        width: 80px;
+        height: 80px;
+        opacity: 0;
+        border-width: 0;
+    }
+}
+
+/* Enhanced cursor for canvas */
+.display-canvas {
+    cursor: crosshair !important;
+}
+
+.display-canvas:hover {
+    box-shadow: 0 0 0 2px rgba(0, 150, 255, 0.5);
+}
+
+/* Better visual feedback for reference selection */
+.reference-selected {
+    animation: referenceGlow 2s infinite;
+}
+
+@keyframes referenceGlow {
+    0%, 100% {
+        box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+    }
+    50% {
+        box-shadow: 0 0 15px rgba(0, 255, 0, 0.8);
+    }
+}
+
+/* Status messages */
+#status {
+    transition: color 0.3s ease;
+}
+
+#status.processing {
+    color: #3498db;
+    font-weight: bold;
+}
+
+#status.success {
+    color: #2ecc71;
+    font-weight: bold;
+}
+
+#status.error {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
+/* Make sure canvas containers are positioned correctly */
+.camera-container {
+    position: relative !important;
+}
+
+#originalCanvas, #processedCanvas {
+    position: relative !important;
+    z-index: 2;
+}
+
+/* Improve button feedback */
+.btn:active {
+    transform: translateY(1px) !important;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+}
+
+/* Loading state for buttons */
+.btn.loading {
+    position: relative;
+    color: transparent !important;
+}
+
+.btn.loading::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-top: -10px;
+    margin-left: -10px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
