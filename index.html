@@ -71,15 +71,14 @@
             <input type="file" id="fileInput" accept="image/*" style="display: none;">
         </div>
 
-        <!-- Reference Input -->
+        <!-- Reference Input - UPDATED -->
         <div class="card">
             <h3><i class="fas fa-balance-scale"></i> Reference Scale</h3>
             <div class="form-group">
                 <label for="refType">Reference Object:</label>
                 <select id="refType" class="form-control">
-                    <option value="coin">Indian 1 Rupee Coin (2.5cm)</option>
-                    <option value="coin2">Indian 2 Rupee Coin (2.7cm)</option>
-                    <option value="coin5">Indian 5 Rupee Coin (2.5cm)</option>
+                    <option value="coin2">Indian 2 Rupee Coin (2.5 cm)</option>
+                    <option value="coin10">Indian 10 Rupee Coin (2.7 cm)</option>
                     <option value="custom">Custom Size</option>
                 </select>
             </div>
@@ -130,14 +129,13 @@
             
             <!-- Visual Output -->
             <div class="image-comparison">
-                <!-- In the image-comparison section, update the original canvas: -->
-<div class="image-box">
-    <h4>Original</h4>
-    <canvas id="originalCanvas" class="display-canvas"></canvas>
-</div>
+                <div class="image-box">
+                    <h4>Original</h4>
+                    <canvas id="originalCanvas" class="display-canvas"></canvas>
+                </div>
                 <div class="image-box">
                     <h4>Processed</h4>
-                    <canvas id="processedCanvas"></canvas>
+                    <canvas id="processedCanvas" class="display-canvas"></canvas>
                 </div>
             </div>
         </div>
@@ -184,20 +182,6 @@
             </button>
             <button id="clearHistory" class="btn btn-small" style="margin-left: 10px;">
                 <i class="fas fa-trash"></i> Clear History
-            </button>
-        </div>
-        
-        <!-- Batch Mode Section (hidden by default) -->
-        <div class="card batch-mode" style="display: none;">
-            <h3><i class="fas fa-layer-group"></i> Batch Processing</h3>
-            <div id="batchInfo">
-                <p>No batch measurements yet. Start batch mode to capture multiple measurements.</p>
-            </div>
-            <button id="startBatch" class="btn btn-outline">
-                <i class="fas fa-play"></i> Start Batch Mode
-            </button>
-            <button id="endBatch" class="btn btn-outline" disabled>
-                <i class="fas fa-stop"></i> End Batch Mode
             </button>
         </div>
     </div>
