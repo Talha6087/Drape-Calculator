@@ -119,8 +119,8 @@ header h1 {
     border-radius: 50%;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%); /* Center the dot */
-    transition: transform 0.2s ease-out;
+    transform: translate(-50%, -50%);
+    transition: transform 0.1s ease-out;
     box-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
     z-index: 2;
 }
@@ -392,11 +392,29 @@ label {
 
 .display-canvas {
     width: 100%;
-    height: 200px;
+    height: 250px;
     background: white;
     border: 1px solid #ddd;
     border-radius: 5px;
     cursor: crosshair;
+    display: block !important;
+}
+
+/* Processed image specific styling */
+.processed-image-overlay {
+    position: relative;
+}
+
+.drape-highlight {
+    fill: rgba(255, 0, 0, 0.3);
+    stroke: #ff0000;
+    stroke-width: 2;
+}
+
+.reference-highlight {
+    fill: rgba(0, 255, 0, 0.3);
+    stroke: #00ff00;
+    stroke-width: 2;
 }
 
 /* History Table */
@@ -473,6 +491,61 @@ tbody tr:hover {
     animation: spin 1s linear infinite;
 }
 
+/* Click feedback animation */
+.click-feedback {
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    border: 2px solid rgba(255, 0, 0, 0.8);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: clickPulse 0.5s ease-out;
+    z-index: 100;
+}
+
+/* Enhanced precision mode */
+.precision-mode {
+    cursor: crosshair !important;
+    position: relative;
+}
+
+.precision-grid {
+    background-image: 
+        linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 20px 20px;
+    pointer-events: none;
+    opacity: 0.3;
+}
+
+/* Reference marker styling */
+.reference-marker {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background: rgba(0, 255, 0, 0.7);
+    border: 2px solid white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 50;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
+}
+
+.reference-marker::after {
+    content: 'REF';
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
 /* Animations */
 @keyframes slideIn {
     from { transform: translateX(100%); opacity: 0; }
@@ -487,6 +560,32 @@ tbody tr:hover {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+@keyframes clickPulse {
+    0% {
+        transform: scale(0.5);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+@keyframes highlightPulse {
+    0% {
+        stroke-width: 2px;
+        stroke-opacity: 0.7;
+    }
+    50% {
+        stroke-width: 4px;
+        stroke-opacity: 0.9;
+    }
+    100% {
+        stroke-width: 2px;
+        stroke-opacity: 0.7;
+    }
 }
 
 /* Responsive Design */
@@ -532,6 +631,10 @@ tbody tr:hover {
     .level-text {
         font-size: 10px;
     }
+    
+    .display-canvas {
+        height: 200px;
+    }
 }
 
 @media (max-width: 480px) {
@@ -554,6 +657,10 @@ tbody tr:hover {
     .form-row .form-group {
         min-width: unset;
     }
+    
+    .display-canvas {
+        height: 180px;
+    }
 }
 
 /* Button Styles */
@@ -575,52 +682,4 @@ tbody tr:hover {
 .btn-small:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-}
-
-/* Add precision cursor and visual feedback */
-#originalCanvas.precision-mode {
-    cursor: crosshair !important;
-}
-
-.click-feedback {
-    position: absolute;
-    width: 30px;
-    height: 30px;
-    border: 2px solid rgba(255, 0, 0, 0.8);
-    border-radius: 50%;
-    pointer-events: none;
-    animation: clickPulse 0.5s ease-out;
-    z-index: 100;
-}
-
-@keyframes clickPulse {
-    0% {
-        transform: scale(0.5);
-        opacity: 1;
-    }
-    100% {
-        transform: scale(2);
-        opacity: 0;
-    }
-}
-
-/* Add a subtle grid overlay for better precision */
-.canvas-grid-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image: 
-        linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-    pointer-events: none;
-    opacity: 0.3;
-    display: none;
-}
-
-#originalCanvas:hover + .canvas-grid-overlay,
-.precision-mode .canvas-grid-overlay {
-    display: block;
 }
