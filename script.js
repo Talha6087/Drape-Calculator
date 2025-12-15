@@ -1,6 +1,68 @@
 /* ================================
    script.js — FIXED & STABLE
    ================================ */
+/* ================================
+   CAMERA + UPLOAD RESTORE LAYER
+   ================================ */
+
+let videoStream = null;
+
+/* ---- Start Camera ---- */
+document.getElementById("startCamera").addEventListener("click", async () => {
+  const video = document.getElementById("cameraVideo");
+
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    });
+
+    video.srcObject = videoStream;
+    video.play();
+
+    document.getElementById("capture").disabled = false;
+    document.getElementById("status").textContent =
+      "Camera started. Capture image when ready.";
+
+  } catch (err) {
+    alert("Camera access failed: " + err.message);
+  }
+});
+
+/* ---- Capture Frame ---- */
+document.getElementById("capture").addEventListener("click", () => {
+  const video = document.getElementById("cameraVideo");
+  const tempCanvas = document.createElement("canvas");
+
+  tempCanvas.width = video.videoWidth;
+  tempCanvas.height = video.videoHeight;
+
+  const ctx = tempCanvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+
+  const img = new Image();
+  img.onload = () => processUploadedImage(img);
+  img.src = tempCanvas.toDataURL("image/png");
+
+  if (videoStream) {
+    videoStream.getTracks().forEach(t => t.stop());
+    videoStream = null;
+  }
+});
+
+/* ---- Upload Image ---- */
+document.getElementById("uploadImage").addEventListener("click", () => {
+  document.getElementById("fileInput").click();
+});
+
+document.getElementById("fileInput").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const img = new Image();
+  img.onload = () => processUploadedImage(img);
+  img.src = URL.createObjectURL(file);
+});
 
 let originalMat = null;
 let imgW = 0, imgH = 0;
