@@ -1718,7 +1718,239 @@ const ReferenceDetection = {
         return null;
     }
 };
+// Fixed ImageData utilities
+const ImageDataUtils = {
+    // FIXED: Create ImageData from OpenCV Mat with proper dimensions
+    matToImageData: function(mat, targetWidth = null, targetHeight = null) {
+        if (!mat || mat.empty()) {
+            console.error('Invalid or empty matrix');
+            return null;
+        }
+        
+        const width = targetWidth || mat.cols;
+        const height = targetHeight || mat.rows;
+        
+        // Ensure we have the right number of channels
+        let rgbaMat = mat;
+        
+        // Convert to RGBA if needed
+        if (mat.channels() === 1) {
+            rgbaMat = new cv.Mat();
+            cv.cvtColor(mat, rgbaMat, cv.COLOR_GRAY2RGBA);
+        } else if (mat.channels() === 3) {
+            rgbaMat = new cv.Mat();
+            cv.cvtColor(mat, rgbaMat, cv.COLOR_RGB2RGBA);
+        } else if (mat.channels() !== 4) {
+            console.error(`Unsupported number of channels: ${mat.channels()}`);
+            return null;
+        }
+        
+        // Resize if target dimensions are different
+        if ((targetWidth && targetWidth !== rgbaMat.cols) || 
+            (targetHeight && targetHeight !== rgbaMat.rows)) {
+            const resizedMat = new cv.Mat();
+            cv.resize(rgbaMat, resizedMat, new cv.Size(width, height), 0, 0, cv.INTER_LINEAR);
+            rgbaMat.delete();
+            rgbaMat = resizedMat;
+        }
+        
+        // Create ImageData
+        const imageData = new ImageData(
+            new Uint8ClampedArray(rgbaMat.data),
+            rgbaMat.cols,
+            rgbaMat.rows
+        );
+        
+        // Clean up if we created a new matrix
+        if (rgbaMat !== mat) {
+            rgbaMat.delete();
+        }
+        
+        return imageData;
+    },
+    
+    // FIXED: Convert canvas to OpenCV Mat with proper color space
+    canvasToMat: function(canvas, colorSpace = cv.COLOR_RGBA2RGB) {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const mat = cv.matFromImageData(imageData);
+        
+        // Convert to desired color space
+        if (colorSpace !== cv.COLOR_RGBA2RGBA) {
+            const convertedMat = new cv.Mat();
+            cv.cvtColor(mat, convertedMat, colorSpace);
+            mat.delete();
+            return convertedMat;
+        }
+        
+        return mat;
+    },
+    
+    // FIXED: Draw OpenCV Mat to canvas with proper scaling
+    drawMatToCanvas: function(mat, canvas, scaleToFit = true) {
+        if (!mat || mat.empty()) {
+            console.error('Cannot draw: invalid matrix');
+            return;
+        }
+        
+        const ctx = canvas.getContext('2d');
+        
+        // Convert to RGBA
+        let rgbaMat = mat;
+        if (mat.channels() !== 4) {
+            rgbaMat = new cv.Mat();
+            if (mat.channels() === 1) {
+                cv.cvtColor(mat, rgbaMat, cv.COLOR_GRAY2RGBA);
+            } else if (mat.channels() === 3) {
+                cv.cvtColor(mat, rgbaMat, cv.COLOR_RGB2RGBA);
+            }
+        }
+        
+        let displayMat = rgbaMat;
+        
+        // Scale if needed
+        if (scaleToFit && (rgbaMat.cols !== canvas.width || rgbaMat.rows !== canvas.height)) {
+            displayMat = new cv.Mat();
+            cv.resize(rgbaMat, displayMat, 
+                new cv.Size(canvas.width, canvas.height),
+                0, 0, cv.INTER_LINEAR
+            );
+        }
+        
+        // Create ImageData
+        const imageData = new ImageData(
+            new Uint8ClampedArray(displayMat.data),
+            displayMat.cols,
+            displayMat.rows
+        );
+        
+        // Clear and draw
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Clean up
+        if (displayMat !== rgbaMat) {
+            displayMat.delete();
+        }
+        if (rgbaMat !== mat) {
+            rgbaMat.delete();
+        }
+    },
+    
+    // FIXED: Validate ImageData dimensions
+    validateImageDataCreation: function(data, width, height) {
+        const expectedLength = width * height * 4;
+        
+        if (data.length !== expectedLength) {
+            console.error(`ImageData validation failed:
+                Data length: ${data.length}
+                Expected: ${expectedLength}
+                Width: ${width}
+                Height: ${height}
+                Channels: 4
+            `);
+            return false;
+        }
+        
+        return true;
+    },
+    
+    // FIXED: Create properly sized Uint8ClampedArray
+    createImageDataBuffer: function(width, height) {
+        const buffer = new Uint8ClampedArray(width * height * 4);
+        
+        // Initialize with transparent black
+        for (let i = 0; i < buffer.length; i += 4) {
+            buffer[i] = 0;     // R
+            buffer[i + 1] = 0; // G
+            buffer[i + 2] = 0; // B
+            buffer[i + 3] = 0; // A (transparent)
+        }
+        
+        return buffer;
+    }
+};
 
+// Enhanced OpenCV utilities
+const OpenCVUtils = {
+    // FIXED: Ensure matrix has proper dimensions for display
+    prepareMatForDisplay: function(mat, targetWidth, targetHeight) {
+        if (!mat || mat.empty()) {
+            console.error('Invalid matrix for display preparation');
+            return null;
+        }
+        
+        let displayMat = mat;
+        
+        // Convert to RGB if needed
+        if (mat.channels() === 1) {
+            displayMat = new cv.Mat();
+            cv.cvtColor(mat, displayMat, cv.COLOR_GRAY2RGB);
+        } else if (mat.channels() === 4) {
+            displayMat = new cv.Mat();
+            cv.cvtColor(mat, displayMat, cv.COLOR_RGBA2RGB);
+        }
+        
+        // Resize if needed
+        if ((targetWidth && targetWidth !== displayMat.cols) || 
+            (targetHeight && targetHeight !== displayMat.rows)) {
+            const resizedMat = new cv.Mat();
+            cv.resize(displayMat, resizedMat, 
+                new cv.Size(targetWidth, targetHeight),
+                0, 0, cv.INTER_LINEAR
+            );
+            
+            if (displayMat !== mat) {
+                displayMat.delete();
+            }
+            displayMat = resizedMat;
+        }
+        
+        return displayMat;
+    },
+    
+    // FIXED: Create contour visualization
+    drawContourOnMat: function(mat, contour, color = [255, 0, 0, 128], thickness = 2) {
+        if (!contour || contour.empty()) return mat;
+        
+        const displayMat = mat.clone();
+        
+        // Convert color to OpenCV Scalar
+        const scalar = new cv.Scalar(color[2], color[1], color[0], color[3]);
+        
+        // Draw contour
+        cv.drawContours(displayMat, [contour], -1, scalar, thickness);
+        
+        // Fill contour with transparency
+        if (color[3] < 255) {
+            const mask = new cv.Mat.zeros(displayMat.rows, displayMat.cols, cv.CV_8UC1);
+            cv.drawContours(mask, [contour], -1, new cv.Scalar(255), cv.FILLED);
+            
+            const fillMat = new cv.Mat(displayMat.rows, displayMat.cols, displayMat.type(), scalar);
+            fillMat.copyTo(displayMat, mask);
+            
+            mask.delete();
+            fillMat.delete();
+        }
+        
+        return displayMat;
+    },
+    
+    // FIXED: Safe matrix operations
+    safeMatOperation: function(mat, operation) {
+        if (!mat || mat.empty()) {
+            console.error('Cannot perform operation on empty matrix');
+            return null;
+        }
+        
+        try {
+            return operation(mat);
+        } catch (error) {
+            console.error('Matrix operation failed:', error);
+            return null;
+        }
+    }
+};
 // Export all utilities
 window.ImageUtils = ImageUtils;
 window.Validation = Validation;
@@ -1731,6 +1963,8 @@ window.UploadUtils = UploadUtils;
 window.ImageAnalysis = ImageAnalysis;
 window.CoordinateUtils = CoordinateUtils;
 window.ReferenceDetection = ReferenceDetection;
+window.ImageDataUtils = ImageDataUtils;
+window.OpenCVUtils = OpenCVUtils;
 
 // Also export a global helper object
 window.DrapeCalculatorUtils = {
