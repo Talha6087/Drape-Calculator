@@ -24,9 +24,108 @@ const ImageUtils = {
         ctx.fillText('Click to select reference', 20, 80);
     },
     
+    // Draw level indicator on canvas
+    drawLevelIndicator: function(ctx, x, y, size, angle) {
+        const radius = size / 2;
+        
+        // Draw outer circle
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Draw inner circle
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 0.8, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // Draw level lines
+        const lineLength = radius * 0.6;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle * Math.PI / 180);
+        
+        // Horizontal line
+        ctx.beginPath();
+        ctx.moveTo(-lineLength, 0);
+        ctx.lineTo(lineLength, 0);
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Vertical line
+        ctx.beginPath();
+        ctx.moveTo(0, -lineLength);
+        ctx.lineTo(0, lineLength);
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        // Draw angle text
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${angle.toFixed(1)}°`, x, y + radius + 15);
+    },
+    
     // Calculate distance between two points
     distance: function(x1, y1, x2, y2) {
         return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    },
+    
+    // Calculate angle from accelerometer data
+    calculateAngleFromAcceleration: function(acceleration) {
+        if (!acceleration || !acceleration.x || !acceleration.y || !acceleration.z) {
+            return 0;
+        }
+        
+        // Calculate inclination angles
+        const angleX = Math.atan2(acceleration.x, Math.sqrt(acceleration.y * acceleration.y + acceleration.z * acceleration.z));
+        const angleY = Math.atan2(acceleration.y, Math.sqrt(acceleration.x * acceleration.x + acceleration.z * acceleration.z));
+        
+        // Return the maximum tilt angle (in degrees)
+        const maxAngle = Math.max(Math.abs(angleX), Math.abs(angleY)) * (180 / Math.PI);
+        return maxAngle;
+    },
+    
+    // Highlight drape area on canvas
+    highlightDrapeArea: function(ctx, contour, color = 'rgba(255, 0, 0, 0.3)') {
+        if (!contour || contour.size() === 0) return;
+        
+        // Create a temporary canvas for highlighting
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Get contour points
+        const points = [];
+        for (let i = 0; i < contour.data32S.length; i += 2) {
+            points.push({x: contour.data32S[i], y: contour.data32S[i+1]});
+        }
+        
+        if (points.length > 0) {
+            // Draw filled contour
+            tempCtx.fillStyle = color;
+            tempCtx.beginPath();
+            tempCtx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                tempCtx.lineTo(points[i].x, points[i].y);
+            }
+            tempCtx.closePath();
+            tempCtx.fill();
+            
+            // Draw outline
+            tempCtx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            tempCtx.lineWidth = 2;
+            tempCtx.stroke();
+            
+            // Apply to main canvas
+            ctx.drawImage(tempCanvas, 0, 0);
+        }
     }
 };
 
@@ -50,6 +149,20 @@ const Validation = {
         if (!imageMat || imageMat.empty()) {
             return { valid: false, error: 'No image available' };
         }
+        return { valid: true };
+    },
+    
+    validateDrapeInputs: function(diskDiameter, fabricDiameter) {
+        const diskValidation = this.validateDiameter(diskDiameter);
+        if (!diskValidation.valid) return diskValidation;
+        
+        const fabricValidation = this.validateDiameter(fabricDiameter);
+        if (!fabricValidation.valid) return fabricValidation;
+        
+        if (fabricDiameter <= diskDiameter) {
+            return { valid: false, error: 'Fabric diameter must be larger than disk diameter' };
+        }
+        
         return { valid: true };
     }
 };
@@ -77,6 +190,26 @@ const FileUtils = {
             reader.onerror = reject;
             reader.readAsDataURL(file);
         });
+    },
+    
+    saveCSV: function(data, filename = 'drape-data.csv') {
+        // Convert data to CSV format
+        let csv = 'Date,Time,Area (cm²),Drape Coefficient (%),Fabric Drape Status\n';
+        
+        data.forEach(item => {
+            csv += `"${item.date}","${item.time}","${item.area}","${item.drapePercent}","${item.status || ''}"\n`;
+        });
+        
+        // Create download link
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
     }
 };
 
@@ -105,12 +238,18 @@ const DrapeFormulas = {
         if (drapeCoefficient < 60) return 'Medium Drape';
         if (drapeCoefficient < 85) return 'Good Drape';
         return 'Excellent Drape';
+    },
+    
+    // Calculate pixel to cm ratio
+    pixelToCmRatio: function(referencePixelDiameter, referenceActualDiameter) {
+        if (referencePixelDiameter <= 0) return 1;
+        return referenceActualDiameter / referencePixelDiameter;
     }
 };
 
 // UI utilities
 const UIUtils = {
-    showToast: function(message, type = 'info') {
+    showToast: function(message, type = 'info', duration = 3000) {
         // Remove existing toast
         const existingToast = document.querySelector('.toast');
         if (existingToast) existingToast.remove();
@@ -126,40 +265,36 @@ const UIUtils = {
             top: 20px;
             right: 20px;
             padding: 15px 25px;
-            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
+            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : type === 'warning' ? '#f39c12' : '#3498db'};
             color: white;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             z-index: 1000;
             animation: slideIn 0.3s ease;
+            max-width: 300px;
+            word-wrap: break-word;
         `;
-        
-        // Add animation style
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideIn {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-        `;
-        document.head.appendChild(style);
         
         document.body.appendChild(toast);
         
-        // Remove toast after 3 seconds
+        // Remove toast after duration
         setTimeout(() => {
             toast.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 300);
+        }, duration);
     },
     
-    showLoading: function(show = true) {
+    showLoading: function(show = true, message = 'Processing...') {
         let loader = document.getElementById('global-loader');
         
         if (show && !loader) {
             loader = document.createElement('div');
             loader.id = 'global-loader';
-            loader.innerHTML = '<div class="loader"></div><p>Processing...</p>';
+            loader.innerHTML = `<div class="loader"></div><p>${message}</p>`;
             loader.style.cssText = `
                 position: fixed;
                 top: 0;
@@ -172,6 +307,7 @@ const UIUtils = {
                 justify-content: center;
                 align-items: center;
                 z-index: 9999;
+                backdrop-filter: blur(3px);
             `;
             document.body.appendChild(loader);
         } else if (!show && loader) {
@@ -187,6 +323,71 @@ const UIUtils = {
         if (text !== null) {
             button.innerHTML = text;
         }
+    },
+    
+    updateLevelIndicator: function(angle) {
+        const bubbleCenter = document.querySelector('.bubble-center');
+        const levelStatus = document.getElementById('levelStatus');
+        
+        if (!bubbleCenter || !levelStatus) return;
+        
+        // Limit angle for visual display
+        const displayAngle = Math.min(angle, 30);
+        
+        // Calculate offset based on angle (simplified 2D representation)
+        const maxOffset = 15; // Maximum pixels to move
+        const offsetX = (Math.sin(angle * Math.PI / 180) * maxOffset);
+        const offsetY = (Math.cos(angle * Math.PI / 180) * maxOffset);
+        
+        bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
+        
+        // Update text and color
+        levelStatus.textContent = angle.toFixed(1);
+        
+        if (angle < 2) {
+            levelStatus.style.color = '#00ff00';
+            bubbleCenter.style.background = '#00ff00';
+        } else if (angle < 5) {
+            levelStatus.style.color = '#ffff00';
+            bubbleCenter.style.background = '#ffff00';
+        } else {
+            levelStatus.style.color = '#ff0000';
+            bubbleCenter.style.background = '#ff0000';
+        }
+    }
+};
+
+// Device utilities
+const DeviceUtils = {
+    isMobile: function() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    },
+    
+    hasAccelerometer: function() {
+        return 'DeviceOrientationEvent' in window || 
+               'DeviceMotionEvent' in window ||
+               (window.DeviceOrientationEvent !== undefined);
+    },
+    
+    requestAccelerometerPermission: function() {
+        return new Promise((resolve) => {
+            if (typeof DeviceOrientationEvent !== 'undefined' && 
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS 13+ devices
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            resolve(true);
+                        } else {
+                            resolve(false);
+                        }
+                    })
+                    .catch(() => resolve(false));
+            } else {
+                // Other devices
+                resolve(true);
+            }
+        });
     }
 };
 
@@ -196,8 +397,9 @@ window.Validation = Validation;
 window.FileUtils = FileUtils;
 window.DrapeFormulas = DrapeFormulas;
 window.UIUtils = UIUtils;
+window.DeviceUtils = DeviceUtils;
 
-// Add CSS for buttons
+// Add CSS for buttons and other UI elements
 document.addEventListener('DOMContentLoaded', function() {
     const style = document.createElement('style');
     style.textContent = `
@@ -209,10 +411,33 @@ document.addEventListener('DOMContentLoaded', function() {
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            transition: background 0.3s;
         }
         
         .btn-small:hover {
             background: #c0392b;
+        }
+        
+        .btn-small:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .level-good {
+            color: #00ff00 !important;
+        }
+        
+        .level-warning {
+            color: #ffff00 !important;
+        }
+        
+        .level-bad {
+            color: #ff0000 !important;
+        }
+        
+        #levelStatus {
+            font-weight: bold;
+            transition: color 0.3s;
         }
     `;
     document.head.appendChild(style);
