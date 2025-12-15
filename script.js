@@ -842,6 +842,462 @@ function resetApp() {
     
     alert('Application reset');
 }
+// ============================================
+// DIAGNOSTIC AND CALIBRATION FUNCTIONS
+// ============================================
+
+// Setup diagnostic event listeners - Call this from initializeApp()
+function setupDiagnosticListeners() {
+    console.log('Setting up diagnostic listeners...');
+    
+    // Run Diagnostics button
+    const runDiagnosticsBtn = document.getElementById('runDiagnostics');
+    if (runDiagnosticsBtn) {
+        runDiagnosticsBtn.addEventListener('click', runDiagnostics);
+        console.log('Run Diagnostics button listener added');
+    }
+    
+    // Calibrate Scale button
+    const calibrateScaleBtn = document.getElementById('calibrateScale');
+    if (calibrateScaleBtn) {
+        calibrateScaleBtn.addEventListener('click', calibrateScale);
+        console.log('Calibrate Scale button listener added');
+    }
+    
+    // Show Debug Info button
+    const showDebugInfoBtn = document.getElementById('showDebugInfo');
+    if (showDebugInfoBtn) {
+        showDebugInfoBtn.addEventListener('click', showDebugInfo);
+        console.log('Show Debug Info button listener added');
+    }
+    
+    // Update estimated diameter when manual scale changes
+    const manualScaleInput = document.getElementById('manualScale');
+    if (manualScaleInput) {
+        manualScaleInput.addEventListener('input', updateEstimatedDiameter);
+    }
+}
+
+// Update estimated coin diameter based on manual scale
+function updateEstimatedDiameter() {
+    const manualScale = parseFloat(document.getElementById('manualScale').value);
+    if (!isNaN(manualScale) && manualScale > 0) {
+        // Calculate: coin diameter in pixels = 2.5cm / scale
+        const estimatedPixels = 2.5 / manualScale;
+        document.getElementById('estimatedDiameter').value = Math.round(estimatedPixels);
+    }
+}
+
+// Run comprehensive diagnostics
+function runDiagnostics() {
+    if (!originalImageMat || !referencePoint) {
+        alert('Please capture an image and select a reference point first.');
+        return;
+    }
+    
+    console.log('=== RUNNING COMPREHENSIVE DIAGNOSTICS ===');
+    
+    let diagnosticReport = '🔍 DIAGNOSTIC REPORT\n\n';
+    let issuesFound = 0;
+    
+    // 1. Check reference point
+    diagnosticReport += '1. REFERENCE POINT ANALYSIS:\n';
+    diagnosticReport += `   • Click position: (${referencePoint.actualX}, ${referencePoint.actualY})\n`;
+    diagnosticReport += `   • Image dimensions: ${actualWidth} × ${actualHeight} px\n`;
+    
+    if (referencePoint.actualX < 10 || referencePoint.actualX > actualWidth - 10 || 
+        referencePoint.actualY < 10 || referencePoint.actualY > actualHeight - 10) {
+        diagnosticReport += '   ⚠️ WARNING: Click too close to image edge\n';
+        issuesFound++;
+    } else {
+        diagnosticReport += '   ✅ OK: Click well within image bounds\n';
+    }
+    
+    // 2. Check scale calculation
+    diagnosticReport += '\n2. SCALE CALCULATION:\n';
+    diagnosticReport += `   • Reference radius: ${referenceRadiusPixels.toFixed(1)} px\n`;
+    diagnosticReport += `   • Pixel-to-cm ratio: ${pixelToCmRatio.toFixed(6)}\n`;
+    diagnosticReport += `   • 1 cm = ${(1/pixelToCmRatio).toFixed(1)} pixels\n`;
+    
+    // Typical values: 2.5cm coin = ~100px diameter = ~50px radius
+    // So pixelToCmRatio should be ~0.025
+    const expectedRatio = 0.025; // 2.5cm / 100px
+    const ratioDiff = Math.abs(pixelToCmRatio - expectedRatio) / expectedRatio;
+    
+    if (ratioDiff > 0.5) { // More than 50% off
+        diagnosticReport += `   ❌ PROBLEM: Scale is ${(ratioDiff * 100).toFixed(0)}% off expected value\n`;
+        diagnosticReport += `   Expected: ~0.025 cm/px (2.5cm coin = 100px diameter)\n`;
+        diagnosticReport += `   Current: ${pixelToCmRatio.toFixed(6)} cm/px\n`;
+        issuesFound++;
+    } else {
+        diagnosticReport += '   ✅ OK: Scale is reasonable\n';
+    }
+    
+    // 3. Check measured area
+    const measuredAreaText = document.getElementById('actualArea').textContent;
+    const measuredArea = parseFloat(measuredAreaText) || 0;
+    const pixelArea = parseFloat(document.getElementById('pixelArea').textContent) || 0;
+    
+    diagnosticReport += '\n3. AREA MEASUREMENT:\n';
+    diagnosticReport += `   • Pixel area: ${pixelArea.toLocaleString()} px²\n`;
+    diagnosticReport += `   • Actual area: ${measuredArea.toFixed(2)} cm²\n`;
+    
+    // 4. Check against expected ranges
+    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value) || 18.0;
+    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value) || 30.0;
+    
+    const diskArea = Math.PI * Math.pow(diskDiameter/2, 2);
+    const fabricArea = Math.PI * Math.pow(fabricDiameter/2, 2);
+    
+    diagnosticReport += '\n4. EXPECTED RANGES:\n';
+    diagnosticReport += `   • Disk area (${diskDiameter}cm): ${diskArea.toFixed(2)} cm²\n`;
+    diagnosticReport += `   • Fabric area (${fabricDiameter}cm): ${fabricArea.toFixed(2)} cm²\n`;
+    diagnosticReport += `   • Drape should be between: ${diskArea.toFixed(2)} - ${fabricArea.toFixed(2)} cm²\n`;
+    
+    if (measuredArea < diskArea * 0.9) {
+        diagnosticReport += '   ❌ PROBLEM: Area too small (less than disk)\n';
+        diagnosticReport += '   Possible: Wrong coin size or bad reference detection\n';
+        issuesFound++;
+    } else if (measuredArea > fabricArea * 1.5) {
+        diagnosticReport += '   ❌ PROBLEM: Area too large (more than fabric)\n';
+        diagnosticReport += '   Possible: Scale too small or includes background\n';
+        issuesFound++;
+    } else if (measuredArea >= diskArea && measuredArea <= fabricArea) {
+        diagnosticReport += '   ✅ OK: Area within reasonable range\n';
+    } else {
+        diagnosticReport += '   ⚠️ WARNING: Area slightly outside expected range\n';
+    }
+    
+    // 5. Check drape coefficient
+    const drapeText = document.getElementById('drapeCoefficient').textContent;
+    const drapeMatch = drapeText.match(/(\d+\.?\d*)/);
+    const drapeValue = drapeMatch ? parseFloat(drapeMatch[1]) : 0;
+    
+    diagnosticReport += '\n5. DRAPE COEFFICIENT:\n';
+    diagnosticReport += `   • Current value: ${drapeValue.toFixed(2)}%\n`;
+    
+    if (drapeValue < 0 || drapeValue > 100) {
+        diagnosticReport += `   ❌ PROBLEM: Value ${drapeValue.toFixed(2)}% outside 0-100% range\n`;
+        issuesFound++;
+    } else if (drapeValue >= 0 && drapeValue <= 100) {
+        diagnosticReport += '   ✅ OK: Value within 0-100% range\n';
+    }
+    
+    // 6. Recommendations
+    diagnosticReport += '\n6. RECOMMENDATIONS:\n';
+    
+    if (issuesFound === 0) {
+        diagnosticReport += '   ✅ All checks passed! Measurements appear correct.\n';
+    } else {
+        diagnosticReport += `   Found ${issuesFound} potential issue(s):\n`;
+        
+        if (ratioDiff > 0.5) {
+            diagnosticReport += '   • Try manual scale calibration\n';
+            diagnosticReport += '   • Ensure you clicked the CENTER of the coin\n';
+            diagnosticReport += '   • Verify coin size in settings (2.5cm for Indian 2 Rupee)\n';
+        }
+        
+        if (measuredArea < diskArea * 0.9) {
+            diagnosticReport += '   • Coin may be detected as too large\n';
+            diagnosticReport += '   • Try clicking closer to coin center\n';
+            diagnosticReport += '   • Use smaller manual scale value\n';
+        }
+        
+        if (measuredArea > fabricArea * 1.5) {
+            diagnosticReport += '   • Coin may be detected as too small\n';
+            diagnosticReport += '   • Try clicking exactly on coin edge\n';
+            diagnosticReport += '   • Use larger manual scale value\n';
+        }
+    }
+    
+    // Show report in alert and console
+    console.log(diagnosticReport);
+    
+    // Create a nicer display
+    showDiagnosticReport(diagnosticReport, issuesFound);
+}
+
+// Show diagnostic report in a modal
+function showDiagnosticReport(report, issuesFound) {
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'diagnosticModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000;
+        padding: 20px;
+    `;
+    
+    // Modal content
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        border-radius: 10px;
+        padding: 25px;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 5px 30px rgba(0,0,0,0.3);
+    `;
+    
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #eee;
+    `;
+    
+    const title = document.createElement('h3');
+    title.style.margin = '0';
+    title.style.color = issuesFound > 0 ? '#e74c3c' : '#2ecc71';
+    title.innerHTML = `<i class="fas fa-stethoscope"></i> Diagnostic Results ${issuesFound > 0 ? ' - Issues Found' : ' - All Good!'}`;
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '<i class="fas fa-times"></i>';
+    closeBtn.style.cssText = `
+        background: none;
+        border: none;
+        font-size: 20px;
+        cursor: pointer;
+        color: #7f8c8d;
+    `;
+    closeBtn.onclick = () => {
+        document.body.removeChild(modal);
+    };
+    
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    
+    // Report content
+    const content = document.createElement('div');
+    content.style.cssText = `
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+        max-height: 400px;
+        overflow-y: auto;
+    `;
+    content.textContent = report;
+    
+    // Actions
+    const actions = document.createElement('div');
+    actions.style.cssText = `
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+    `;
+    
+    const calibrateBtn = document.createElement('button');
+    calibrateBtn.innerHTML = '<i class="fas fa-ruler"></i> Calibrate Scale';
+    calibrateBtn.className = 'btn btn-warning';
+    calibrateBtn.onclick = () => {
+        document.body.removeChild(modal);
+        showCalibrationHelp();
+    };
+    
+    const closeButton = document.createElement('button');
+    closeButton.innerHTML = '<i class="fas fa-check"></i> Close';
+    closeButton.className = 'btn btn-primary';
+    closeButton.onclick = () => {
+        document.body.removeChild(modal);
+    };
+    
+    actions.appendChild(calibrateBtn);
+    actions.appendChild(closeButton);
+    
+    // Assemble modal
+    modalContent.appendChild(header);
+    modalContent.appendChild(content);
+    modalContent.appendChild(actions);
+    modal.appendChild(modalContent);
+    
+    // Add to page
+    document.body.appendChild(modal);
+    
+    // Close on ESC key
+    modal.onkeydown = (e) => {
+        if (e.key === 'Escape') {
+            document.body.removeChild(modal);
+        }
+    };
+    modal.focus();
+}
+
+// Show calibration help
+function showCalibrationHelp() {
+    const helpText = `📏 CALIBRATION GUIDE
+
+If drape coefficient is >100%, follow these steps:
+
+STEP 1: Check Coin Detection
+• The green circle should match the coin size
+• If circle is too small/big, scale is wrong
+
+STEP 2: Manual Calibration
+1. Measure coin diameter in image (pixels):
+   - Right-click image → "Inspect"
+   - Use ruler tool or count pixels
+
+2. Calculate correct scale:
+   Scale = Coin Diameter (cm) ÷ Pixel Diameter
+
+3. Enter scale in "Manual Scale" field
+   Example: 2.5cm coin = 100 pixels
+   Scale = 2.5 ÷ 100 = 0.025
+
+STEP 3: Apply and Retest
+1. Click "Apply Manual Scale"
+2. Click coin again to recalculate
+3. Check if drape coefficient is now 0-100%
+
+Common Scale Values:
+• 2.5cm coin = ~100px → 0.025
+• 2.5cm coin = ~80px  → 0.03125
+• 2.5cm coin = ~120px → 0.02083
+
+Need help? Try these test scales: 0.020, 0.025, 0.030`;
+
+    alert(helpText);
+    
+    // Focus on manual scale input
+    const manualScaleInput = document.getElementById('manualScale');
+    if (manualScaleInput) {
+        manualScaleInput.focus();
+        manualScaleInput.select();
+    }
+}
+
+// Apply manual scale calibration
+function calibrateScale() {
+    const manualScaleInput = document.getElementById('manualScale');
+    const manualScale = parseFloat(manualScaleInput.value);
+    
+    if (isNaN(manualScale) || manualScale <= 0 || manualScale > 1) {
+        alert('Please enter a valid scale between 0.001 and 1.0');
+        manualScaleInput.focus();
+        manualScaleInput.select();
+        return;
+    }
+    
+    // Update global scale
+    pixelToCmRatio = manualScale;
+    
+    // Update estimated diameter display
+    updateEstimatedDiameter();
+    
+    // If we have a measured pixel area, recalculate
+    const pixelAreaText = document.getElementById('pixelArea').textContent;
+    if (pixelAreaText !== '--') {
+        const pixelArea = parseFloat(pixelAreaText);
+        if (!isNaN(pixelArea)) {
+            // Recalculate area
+            const newArea = pixelArea * manualScale * manualScale;
+            document.getElementById('actualArea').textContent = newArea.toFixed(2);
+            
+            // Recalculate drape coefficient
+            const drapeCoefficient = calculateDrapeCoefficient(newArea);
+            if (drapeCoefficient !== null) {
+                document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
+                
+                // Update history with new calculation
+                const historyIndex = measurementHistory.findIndex(m => m.area === pixelAreaText);
+                if (historyIndex !== -1) {
+                    measurementHistory[historyIndex].area = newArea.toFixed(2);
+                    measurementHistory[historyIndex].drapePercent = drapeCoefficient.toFixed(2);
+                    updateHistoryTable();
+                    saveHistory();
+                }
+            }
+            
+            alert(`Scale calibrated to: ${manualScale.toFixed(6)} cm/pixel\n1 cm = ${(1/manualScale).toFixed(1)} pixels\nAreas recalculated.`);
+        }
+    } else {
+        alert(`Scale set to: ${manualScale.toFixed(6)} cm/pixel\n1 cm = ${(1/manualScale).toFixed(1)} pixels\nCapture a new image to use this scale.`);
+    }
+}
+
+// Show debug information
+function showDebugInfo() {
+    let debugInfo = '🛠️ DEBUG INFORMATION\n\n';
+    
+    debugInfo += 'Image Properties:\n';
+    debugInfo += `• Original dimensions: ${actualWidth} × ${actualHeight} px\n`;
+    debugInfo += `• Display dimensions: ${displayWidth} × ${displayHeight} px\n`;
+    debugInfo += `• Display scale: ${displayScale.toFixed(4)}\n\n`;
+    
+    debugInfo += 'Reference Information:\n';
+    if (referencePoint) {
+        debugInfo += `• Click position: (${referencePoint.displayX}, ${referencePoint.displayY}) display\n`;
+        debugInfo += `• Actual position: (${referencePoint.actualX}, ${referencePoint.actualY}) px\n`;
+        debugInfo += `• Reference radius: ${referenceRadiusPixels.toFixed(1)} px\n`;
+    } else {
+        debugInfo += '• No reference point selected\n';
+    }
+    
+    debugInfo += `• Pixel-to-cm ratio: ${pixelToCmRatio.toFixed(6)}\n`;
+    debugInfo += `• 1 pixel = ${(pixelToCmRatio * 10).toFixed(3)} mm\n\n`;
+    
+    debugInfo += 'Current Measurements:\n';
+    debugInfo += `• Pixel area: ${document.getElementById('pixelArea').textContent}\n`;
+    debugInfo += `• Actual area: ${document.getElementById('actualArea').textContent}\n`;
+    debugInfo += `• Drape coefficient: ${document.getElementById('drapeCoefficient').textContent}\n\n`;
+    
+    debugInfo += 'Settings:\n';
+    debugInfo += `• Disk diameter: ${document.getElementById('diskDiameter').value} cm\n`;
+    debugInfo += `• Fabric diameter: ${document.getElementById('fabricDiameter').value} cm\n`;
+    debugInfo += `• Reference type: ${document.getElementById('refType').value}\n`;
+    
+    // Show in console
+    console.log(debugInfo);
+    
+    // Show to user
+    const debugModal = document.createElement('div');
+    debugModal.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 5px 30px rgba(0,0,0,0.3);
+        z-index: 2000;
+        max-width: 500px;
+        max-height: 70vh;
+        overflow-y: auto;
+    `;
+    
+    debugModal.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h4 style="margin: 0; color: #3498db;"><i class="fas fa-bug"></i> Debug Information</h4>
+            <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #7f8c8d;">×</button>
+        </div>
+        <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; font-size: 12px; line-height: 1.4; white-space: pre-wrap; max-height: 400px; overflow-y: auto;">${debugInfo}</pre>
+        <div style="margin-top: 15px; text-align: center;">
+            <button onclick="this.parentElement.parentElement.remove()" class="btn btn-primary" style="padding: 8px 20px;">Close</button>
+        </div>
+    `;
+    
+    document.body.appendChild(debugModal);
+}
+
 
 // Initialize when page loads (fallback)
 if (document.readyState === 'loading') {
