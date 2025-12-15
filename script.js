@@ -224,52 +224,45 @@ function handleCanvasClick(event) {
     }
     
     const canvas = event.target;
-    const rect = canvas.getBoundingClientRect();
     
-    // Calculate click position in canvas coordinates
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    // Use the fixed utility function
+    const clickData = ImageUtils.calculateCanvasClick(
+        event, 
+        canvas, 
+        actualWidth, 
+        actualHeight
+    );
     
-    console.log('Canvas click - Display coordinates:', x, y);
-    console.log('Canvas dimensions:', canvas.width, canvas.height);
-    console.log('Actual image dimensions:', actualWidth, actualHeight);
-    console.log('Display scale:', displayScale);
+    // Validate the click
+    const validation = Validation.validateCanvasClick(
+        clickData, 
+        canvas, 
+        actualWidth, 
+        actualHeight
+    );
     
-    // Calculate actual image coordinates
-    const actualX = Math.round(x / displayScale);
-    const actualY = Math.round(y / displayScale);
-    
-    console.log('Calculated actual coordinates:', actualX, actualY);
-    
-    // Validate coordinates
-    if (actualX < 0 || actualX >= actualWidth || actualY < 0 || actualY >= actualHeight) {
-        alert('Click is outside the image area. Please click on the coin within the image.');
+    if (!validation.valid) {
+        alert(validation.error);
         return;
     }
     
     // Store reference point
     referencePoint = {
-        displayX: x,
-        displayY: y,
-        actualX: actualX,
-        actualY: actualY
+        displayX: clickData.clickX,
+        displayY: clickData.clickY,
+        actualX: clickData.actualX,
+        actualY: clickData.actualY,
+        canvasX: clickData.canvasX,
+        canvasY: clickData.canvasY
     };
     
-    console.log('Reference point stored:', referencePoint);
+    console.log('Reference point selected:', referencePoint);
     
-    // Draw visual feedback on the canvas
-    drawReferenceMarker(canvas, x, y);
+    // Draw visual feedback
+    UIUtils.drawReferenceMarkerOnCanvas(canvas, clickData.clickX, clickData.clickY);
+    UIUtils.createClickFeedback(clickData.clickX, clickData.clickY);
     
-    // Create click animation
-    createClickFeedback(x, y);
-    
-    // Update status
-    document.getElementById('status').textContent = 'Reference selected. Processing image...';
-    
-    // Enable calculation buttons
-    updateUIState();
-    
-    // Process image immediately
+    // Process image
     setTimeout(() => {
         processImageWithReference();
     }, 300);
