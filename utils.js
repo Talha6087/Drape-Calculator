@@ -340,36 +340,44 @@ const UIUtils = {
         }
     },
     
-    updateLevelIndicator: function(angle) {
-        const bubbleCenter = document.querySelector('.bubble-center');
-        const levelStatus = document.getElementById('levelStatus');
-        
-        if (!bubbleCenter || !levelStatus) return;
-        
-        // Limit angle for visual display
-        const displayAngle = Math.min(angle, 30);
-        
-        // Calculate offset based on angle (simplified 2D representation)
-        const maxOffset = 15; // Maximum pixels to move
-        const offsetX = (Math.sin(angle * Math.PI / 180) * maxOffset);
-        const offsetY = (Math.cos(angle * Math.PI / 180) * maxOffset);
-        
-        bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
-        
-        // Update text and color
-        levelStatus.textContent = angle.toFixed(1);
-        
-        if (angle < 2) {
-            levelStatus.style.color = '#00ff00';
-            bubbleCenter.style.background = '#00ff00';
-        } else if (angle < 5) {
-            levelStatus.style.color = '#ffff00';
-            bubbleCenter.style.background = '#ffff00';
-        } else {
-            levelStatus.style.color = '#ff0000';
-            bubbleCenter.style.background = '#ff0000';
-        }
+ // In UIUtils.updateLevelIndicator function:
+updateLevelIndicator: function(angle) {
+    const bubbleCenter = document.querySelector('.bubble-center');
+    const levelStatus = document.getElementById('levelStatus');
+    
+    if (!bubbleCenter || !levelStatus) return;
+    
+    // Update angle display
+    levelStatus.textContent = angle.toFixed(1);
+    
+    // Remove previous classes
+    bubbleCenter.classList.remove('level-good', 'level-moderate', 'level-extreme');
+    
+    // Update color based on angle
+    if (angle < 2) {
+        levelStatus.style.color = '#00ff00';
+        bubbleCenter.classList.add('level-good');
+    } else if (angle < 5) {
+        levelStatus.style.color = '#ffff00';
+        bubbleCenter.classList.add('level-moderate');
+    } else {
+        levelStatus.style.color = '#ff0000';
+        bubbleCenter.classList.add('level-extreme');
     }
+    
+    // Calculate bubble movement based on angle
+    // For a 50px bubble, max movement should be ~20px
+    const maxMovement = 20;
+    const movement = Math.min(angle * 2, maxMovement); // Scale factor
+    
+    // Convert angle to X and Y offsets (simplified)
+    // For a real accelerometer, you'd use the actual X/Y tilt values
+    const offsetX = Math.sin(angle * Math.PI / 180) * movement;
+    const offsetY = Math.cos(angle * Math.PI / 180) * movement;
+    
+    // Apply the transform
+    bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
+}
 };
 
 // Device utilities
