@@ -137,13 +137,20 @@ function setupEventListeners() {
     console.log('All event listeners set up');
 }
 
-// FIXED: Handle start camera with CameraUtils
 async function handleStartCamera() {
     try {
         UIUtils.showLoading(true, 'Starting camera...');
         
-        // Use CameraUtils from utils.js
-        const result = await CameraUtils.initCamera('cameraVideo', 'cameraCanvas');
+        // Reset video display
+        const video = document.getElementById('cameraVideo');
+        video.style.display = 'block';
+        
+        // Hide canvases
+        document.getElementById('originalCanvas').style.display = 'none';
+        document.getElementById('processedCanvas').style.display = 'none';
+        
+        // Start camera
+        await CameraUtils.startCamera();
         
         streaming = true;
         updateUIState();
@@ -154,6 +161,22 @@ async function handleStartCamera() {
         console.error('Error starting camera:', error);
         UIUtils.showToast('Failed to start camera: ' + error, 'error');
         document.getElementById('status').textContent = 'Camera error: ' + error;
+        
+        // Try fallback for iOS Safari
+        if (error.includes('requestDevice') || error.includes('permission')) {
+            const video = document.getElementById('cameraVideo');
+            const constraints = { video: true };
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                streaming = true;
+                updateUIState();
+                UIUtils.showToast('Camera started (fallback mode)', 'success');
+            } catch (fallbackError) {
+                console.error('Fallback also failed:', fallbackError);
+            }
+        }
     } finally {
         UIUtils.showLoading(false);
     }
@@ -283,13 +306,17 @@ function handleCanvasClick(event) {
     const canvas = event.target;
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate click position in canvas coordinates
+    // Get mouse position relative to canvas
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Calculate actual image coordinates
-    const actualX = Math.round(x / displayScale);
-    const actualY = Math.round(y / displayScale);
+    // Ensure coordinates are within canvas bounds
+    const canvasX = Math.max(0, Math.min(x, canvas.width - 1));
+    const canvasY = Math.max(0, Math.min(y, canvas.height - 1));
+    
+    // Calculate actual image coordinates using the display scale
+    const actualX = Math.round(canvasX / displayScale);
+    const actualY = Math.round(canvasY / displayScale);
     
     // Validate coordinates
     if (actualX < 0 || actualX >= actualWidth || actualY < 0 || actualY >= actualHeight) {
@@ -297,32 +324,35 @@ function handleCanvasClick(event) {
         return;
     }
     
+    console.log('Canvas click:', canvasX, canvasY);
+    console.log('Actual coordinates:', actualX, actualY);
+    console.log('Display scale:', displayScale);
+    
     // Store reference point
     referencePoint = {
-        displayX: x,
-        displayY: y,
+        displayX: canvasX,
+        displayY: canvasY,
         actualX: actualX,
-        actualY: actualY
+        actualY: actualY,
+        timestamp: Date.now()
     };
     
-    console.log('Reference point stored:', referencePoint);
-    
-    // Draw visual feedback
-    drawReferenceMarker(canvas, x, y);
+    // Draw visual feedback on canvas
+    drawReferenceMarker(canvas, canvasX, canvasY);
     
     // Create click animation
-    UIUtils.createClickFeedback(x, y, 'rgba(0, 255, 0, 0.8)', 40);
+    UIUtils.createClickFeedback(x + rect.left, y + rect.top, 'rgba(0, 255, 0, 0.8)', 40);
     
     // Update status
-    document.getElementById('status').textContent = 'Reference selected. Processing image...';
+    document.getElementById('status').textContent = 'Reference selected. Processing...';
     
-    // Enable calculation buttons
+    // Update UI
     updateUIState();
     
-    // Process image immediately
+    // Process image after a short delay
     setTimeout(() => {
         processImageWithReference();
-    }, 300);
+    }, 500);
 }
 
 // Draw reference marker on canvas
@@ -514,58 +544,242 @@ async function processImageWithReference() {
         UIUtils.showLoading(false);
     }
 }
+function processUploadedImage(img) {
+    const video = document.getElementById('cameraVideo');
+    const canvas = document.getElementById('cameraCanvas');
+    const originalCanvas = document.getElementById('originalCanvas');
+    
+    // Hide video
+    video.style.display = 'none';
+    
+    // Store actual dimensions
+    actualWidth = img.naturalWidth || img.width;
+    actualHeight = img.naturalHeight || img.height;
+    
+    console.log('Image dimensions:', actualWidth, 'x', actualHeight);
+    
+    // Set processing canvas to actual image size
+    canvas.width = actualWidth;
+    canvas.height = actualHeight;
+    
+    // Draw image to processing canvas
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, actualWidth, actualHeight);
+    
+    // Calculate display size (max 400px width)
+    const maxDisplayWidth = 400;
+    const maxDisplayHeight = 300;
+    
+    let displayWidth = actualWidth;
+    let displayHeight = actualHeight;
+    
+    if (displayWidth > maxDisplayWidth) {
+        const ratio = maxDisplayWidth / displayWidth;
+        displayWidth = maxDisplayWidth;
+        displayHeight = Math.round(displayHeight * ratio);
+    }
+    
+    if (displayHeight > maxDisplayHeight) {
+        const ratio = maxDisplayHeight / displayHeight;
+        displayHeight = maxDisplayHeight;
+        displayWidth = Math.round(displayWidth * ratio);
+    }
+    
+    // Set display canvas dimensions
+    originalCanvas.width = displayWidth;
+    originalCanvas.height = displayHeight;
+    
+    // Calculate scale factor
+    displayScale = displayWidth / actualWidth;
+    console.log('Display dimensions:', displayWidth, 'x', displayHeight);
+    console.log('Display scale:', displayScale);
+    
+    // Draw scaled image to display canvas
+    const displayCtx = originalCanvas.getContext('2d');
+    displayCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
+    
+    // Convert to OpenCV Mat
+    const imageData = ctx.getImageData(0, 0, actualWidth, actualHeight);
+    if (originalImageMat) {
+        originalImageMat.delete();
+    }
+    originalImageMat = cv.matFromImageData(imageData);
+    
+    // Convert to RGB for OpenCV processing
+    cv.cvtColor(originalImageMat, originalImageMat, cv.COLOR_RGBA2RGB);
+    
+    // Show canvas
+    originalCanvas.style.display = 'block';
+    originalCanvas.style.cursor = 'crosshair';
+    
+    // Reset processed canvas
+    const processedCanvas = document.getElementById('processedCanvas');
+    processedCanvas.style.display = 'none';
+    
+    // Update UI
+    document.getElementById('status').textContent = 'Image loaded. Click on the reference coin for scale.';
+    document.getElementById('pixelArea').textContent = '--';
+    document.getElementById('actualArea').textContent = '--';
+    document.getElementById('drapeCoefficient').textContent = '--';
+    
+    // Reset reference point
+    referencePoint = null;
+    
+    updateUIState();
+    
+    console.log('Image processed successfully');
+}
 
 // Detect reference object using OpenCV
 function detectReferenceObject(srcMat, clickX, clickY) {
-    let processedMat = new cv.Mat();
-    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
+    console.log('Detecting reference at:', clickX, clickY);
     
-    cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
+    // Create a region of interest around the click point
+    const roiSize = 200;
+    const xStart = Math.max(0, clickX - roiSize/2);
+    const yStart = Math.max(0, clickY - roiSize/2);
+    const xEnd = Math.min(srcMat.cols, clickX + roiSize/2);
+    const yEnd = Math.min(srcMat.rows, clickY + roiSize/2);
     
+    // Extract ROI
+    const roiRect = new cv.Rect(xStart, yStart, xEnd - xStart, yEnd - yStart);
+    const roi = srcMat.roi(roiRect);
+    
+    // Convert to grayscale
+    let gray = new cv.Mat();
+    cv.cvtColor(roi, gray, cv.COLOR_RGB2GRAY);
+    
+    // Apply Gaussian blur
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+    
+    // Detect circles using Hough Transform
     let circles = new cv.Mat();
-    cv.HoughCircles(processedMat, circles, cv.HOUGH_GRADIENT, 
-        1, 30, 100, 30, 20, 150
+    cv.HoughCircles(gray, circles, cv.HOUGH_GRADIENT, 
+        1,              // dp
+        20,             // minDist
+        100,            // param1
+        30,             // param2
+        20,             // minRadius
+        100             // maxRadius
     );
     
     console.log('Circles found:', circles.cols);
     
-    let detectedRadius = 0;
+    let bestCircle = null;
     let minDistance = Infinity;
     
+    // Find the circle closest to the click point
     for (let i = 0; i < circles.cols; i++) {
-        let circle = circles.data32F.slice(i * 3, (i + 1) * 3);
-        let x = circle[0];
-        let y = circle[1];
-        let radius = circle[2];
+        const circleData = circles.data32F.subarray(i * 3, (i + 1) * 3);
+        const x = circleData[0] + xStart;
+        const y = circleData[1] + yStart;
+        const radius = circleData[2];
         
-        let distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
+        const distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
         
-        if (distance < minDistance) {
+        // Prefer circles closer to click point
+        if (distance < minDistance && radius > 15 && radius < 100) {
             minDistance = distance;
-            detectedRadius = radius;
+            bestCircle = {
+                x: x,
+                y: y,
+                radius: radius,
+                distance: distance
+            };
         }
     }
     
-    processedMat.delete();
+    // Clean up
+    gray.delete();
     circles.delete();
+    roi.delete();
     
-    if (detectedRadius <= 0 || minDistance > 100) {
-        console.log('No circle detected near click, using default radius');
-        return 40;
+    // If no circle found, try edge-based detection
+    if (!bestCircle || minDistance > 50) {
+        console.log('No circle detected, using edge detection');
+        return detectReferenceByEdges(srcMat, clickX, clickY);
     }
     
-    return detectedRadius;
+    console.log('Best circle:', bestCircle);
+    return bestCircle.radius;
 }
+function detectReferenceByEdges(srcMat, clickX, clickY) {
+    const roiSize = 150;
+    const xStart = Math.max(0, clickX - roiSize/2);
+    const yStart = Math.max(0, clickY - roiSize/2);
+    const xEnd = Math.min(srcMat.cols, clickX + roiSize/2);
+    const yEnd = Math.min(srcMat.rows, clickY + roiSize/2);
+    
+    const roiRect = new cv.Rect(xStart, yStart, xEnd - xStart, yEnd - yStart);
+    const roi = srcMat.roi(roiRect);
+    
+    let gray = new cv.Mat();
+    cv.cvtColor(roi, gray, cv.COLOR_RGB2GRAY);
+    
+    // Edge detection
+    let edges = new cv.Mat();
+    cv.Canny(gray, edges, 50, 150);
+    
+    // Find contours
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(edges, contours, hierarchy, 
+        cv.RETR_EXTERNAL, 
+        cv.CHAIN_APPROX_SIMPLE
+    );
+    
+    let bestContour = null;
+    let bestCircularity = 0;
+    
+    for (let i = 0; i < contours.size(); i++) {
+        const contour = contours.get(i);
+        const area = cv.contourArea(contour);
+        const perimeter = cv.arcLength(contour, true);
+        
+        if (perimeter > 0) {
+            const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+            
+            if (circularity > 0.7 && circularity > bestCircularity) {
+                bestCircularity = circularity;
+                bestContour = contour;
+            }
+        }
+    }
+    
+    let radius = 40; // Default
+    
+    if (bestContour) {
+        // Calculate radius from area
+        const area = cv.contourArea(bestContour);
+        radius = Math.sqrt(area / Math.PI);
+        console.log('Edge-based radius:', radius);
+    }
+    
+    // Clean up
+    gray.delete();
+    edges.delete();
+    contours.delete();
+    hierarchy.delete();
+    roi.delete();
+    
+    return radius;
+}
+
 
 // Detect drape area using OpenCV
 function detectDrapeArea(srcMat) {
-    let processedMat = new cv.Mat();
-    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
+    console.log('Detecting drape area...');
     
-    cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
+    // Convert to grayscale
+    let gray = new cv.Mat();
+    cv.cvtColor(srcMat, gray, cv.COLOR_RGB2GRAY);
     
-    let thresholdMat = new cv.Mat();
-    cv.adaptiveThreshold(processedMat, thresholdMat, 
+    // Apply Gaussian blur to reduce noise
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+    
+    // Use adaptive threshold for better shadow detection
+    let binary = new cv.Mat();
+    cv.adaptiveThreshold(gray, binary, 
         255,
         cv.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv.THRESH_BINARY_INV,
@@ -573,31 +787,67 @@ function detectDrapeArea(srcMat) {
         2
     );
     
+    // Morphological operations to clean up
+    let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
+    cv.morphologyEx(binary, binary, cv.MORPH_OPEN, kernel);
+    
+    // Find contours
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
-    cv.findContours(thresholdMat, contours, hierarchy, 
+    cv.findContours(binary, contours, hierarchy, 
         cv.RETR_EXTERNAL, 
         cv.CHAIN_APPROX_SIMPLE
     );
     
     let maxArea = 0;
+    let largestContour = null;
     
+    // Find the largest contour (drape area)
     for (let i = 0; i < contours.size(); i++) {
-        let contour = contours.get(i);
-        let area = cv.contourArea(contour);
+        const contour = contours.get(i);
+        const area = cv.contourArea(contour);
         
-        if (area > maxArea) {
+        // Filter out very small areas
+        if (area > maxArea && area > 1000) {
             maxArea = area;
+            largestContour = contour;
         }
     }
     
-    processedMat.delete();
-    thresholdMat.delete();
+    console.log('Largest drape area (pixels):', maxArea);
+    
+    // If no large contour found, try a different approach
+    if (maxArea === 0) {
+        console.log('No contour found, trying Otsu threshold...');
+        
+        // Try Otsu's method
+        cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        
+        for (let i = 0; i < contours.size(); i++) {
+            const contour = contours.get(i);
+            const area = cv.contourArea(contour);
+            
+            if (area > maxArea && area > 1000) {
+                maxArea = area;
+                largestContour = contour;
+            }
+        }
+    }
+    
+    // Clean up
+    gray.delete();
+    binary.delete();
+    kernel.delete();
     hierarchy.delete();
+    
+    if (largestContour) {
+        largestContour.delete();
+    }
     
     return maxArea;
 }
-
 // Create processed image with highlights
 function createProcessedImage() {
     if (!originalImageMat || !referencePoint) return;
