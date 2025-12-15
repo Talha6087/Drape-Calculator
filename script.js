@@ -1,4 +1,4 @@
-// Drape Area Calculator - Fixed Reference Point Selection
+// Drape Area Calculator - Fixed ImageData Construction Error
 
 // Global variables
 let stream = null;
@@ -14,6 +14,8 @@ let displayScale = 1;
 let actualWidth = 0;
 let actualHeight = 0;
 let imageDataURL = null; // Store original image data URL
+let displayWidth = 0;
+let displayHeight = 0;
 
 // OpenCV ready handler
 function onOpenCvReady() {
@@ -224,45 +226,52 @@ function handleCanvasClick(event) {
     }
     
     const canvas = event.target;
+    const rect = canvas.getBoundingClientRect();
     
-    // Use the fixed utility function
-    const clickData = ImageUtils.calculateCanvasClick(
-        event, 
-        canvas, 
-        actualWidth, 
-        actualHeight
-    );
+    // Calculate click position in canvas coordinates
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     
-    // Validate the click
-    const validation = Validation.validateCanvasClick(
-        clickData, 
-        canvas, 
-        actualWidth, 
-        actualHeight
-    );
+    console.log('Canvas click - Display coordinates:', x, y);
+    console.log('Canvas dimensions:', canvas.width, canvas.height);
+    console.log('Actual image dimensions:', actualWidth, actualHeight);
+    console.log('Display scale:', displayScale);
     
-    if (!validation.valid) {
-        alert(validation.error);
+    // Calculate actual image coordinates
+    const actualX = Math.round(x / displayScale);
+    const actualY = Math.round(y / displayScale);
+    
+    console.log('Calculated actual coordinates:', actualX, actualY);
+    
+    // Validate coordinates
+    if (actualX < 0 || actualX >= actualWidth || actualY < 0 || actualY >= actualHeight) {
+        alert('Click is outside the image area. Please click on the coin within the image.');
         return;
     }
     
     // Store reference point
     referencePoint = {
-        displayX: clickData.clickX,
-        displayY: clickData.clickY,
-        actualX: clickData.actualX,
-        actualY: clickData.actualY,
-        canvasX: clickData.canvasX,
-        canvasY: clickData.canvasY
+        displayX: x,
+        displayY: y,
+        actualX: actualX,
+        actualY: actualY
     };
     
-    console.log('Reference point selected:', referencePoint);
+    console.log('Reference point stored:', referencePoint);
     
-    // Draw visual feedback
-    UIUtils.drawReferenceMarkerOnCanvas(canvas, clickData.clickX, clickData.clickY);
-    UIUtils.createClickFeedback(clickData.clickX, clickData.clickY);
+    // Draw visual feedback on the canvas
+    drawReferenceMarker(canvas, x, y);
     
-    // Process image
+    // Create click animation
+    createClickFeedback(x, y);
+    
+    // Update status
+    document.getElementById('status').textContent = 'Reference selected. Processing image...';
+    
+    // Enable calculation buttons
+    updateUIState();
+    
+    // Process image immediately
     setTimeout(() => {
         processImageWithReference();
     }, 300);
@@ -495,8 +504,8 @@ function processUploadedImage(img) {
     const maxWidth = originalCanvas.parentElement.clientWidth - 40; // Account for padding
     const maxHeight = 300;
     
-    let displayWidth = actualWidth;
-    let displayHeight = actualHeight;
+    displayWidth = actualWidth;
+    displayHeight = actualHeight;
     
     if (displayWidth > maxWidth || displayHeight > maxHeight) {
         const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
@@ -515,9 +524,12 @@ function processUploadedImage(img) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, actualWidth, actualHeight);
     
-    // Convert to OpenCV Mat
+    // Convert to OpenCV Mat - FIXED: Use proper color conversion
     const imageData = ctx.getImageData(0, 0, actualWidth, actualHeight);
     originalImageMat = cv.matFromImageData(imageData);
+    
+    // Convert to proper color space for display
+    cv.cvtColor(originalImageMat, originalImageMat, cv.COLOR_RGBA2RGB);
     
     // Draw to display canvas
     const displayCtx = originalCanvas.getContext('2d');
@@ -562,8 +574,8 @@ function captureImage() {
     const maxWidth = originalCanvas.parentElement.clientWidth - 40;
     const maxHeight = 300;
     
-    let displayWidth = actualWidth;
-    let displayHeight = actualHeight;
+    displayWidth = actualWidth;
+    displayHeight = actualHeight;
     
     if (displayWidth > maxWidth || displayHeight > maxHeight) {
         const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
@@ -585,6 +597,9 @@ function captureImage() {
     // Convert to OpenCV Mat
     const imageData = ctx.getImageData(0, 0, actualWidth, actualHeight);
     originalImageMat = cv.matFromImageData(imageData);
+    
+    // Convert to proper color space
+    cv.cvtColor(originalImageMat, originalImageMat, cv.COLOR_RGBA2RGB);
     
     // Save as data URL for later use
     imageDataURL = canvas.toDataURL('image/png');
@@ -678,7 +693,7 @@ async function processImageWithReference() {
 function detectReferenceObject(srcMat, clickX, clickY) {
     // Create a copy for processing
     let processedMat = new cv.Mat();
-    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGBA2GRAY);
+    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
     
     // Apply Gaussian blur
     cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
@@ -735,12 +750,12 @@ function detectReferenceObject(srcMat, clickX, clickY) {
 function detectDrapeArea(srcMat) {
     // Create a copy for processing
     let processedMat = new cv.Mat();
-    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGBA2GRAY);
+    cv.cvtColor(srcMat, processedMat, cv.COLOR_RGB2GRAY);
     
     // Apply Gaussian blur
     cv.GaussianBlur(processedMat, processedMat, new cv.Size(5, 5), 0);
     
-    // Apply threshold to highlight dark areas (drape shadow)
+    // Apply adaptive threshold to highlight dark areas (drape shadow)
     let thresholdMat = new cv.Mat();
     cv.adaptiveThreshold(processedMat, thresholdMat, 
         255, // max value
@@ -759,6 +774,7 @@ function detectDrapeArea(srcMat) {
     );
     
     let maxArea = 0;
+    let largestContour = null;
     
     // Find the largest contour (likely the drape area)
     for (let i = 0; i < contours.size(); i++) {
@@ -768,11 +784,21 @@ function detectDrapeArea(srcMat) {
         if (area > maxArea) {
             maxArea = area;
             // Store for processed image
-            if (window.largestContour) {
-                window.largestContour.delete();
+            if (largestContour) {
+                largestContour.delete();
             }
-            window.largestContour = contour.clone();
+            largestContour = contour.clone();
         }
+    }
+    
+    // Store for processed image
+    if (largestContour) {
+        if (window.largestContour) {
+            window.largestContour.delete();
+        }
+        window.largestContour = largestContour;
+    } else {
+        window.largestContour = null;
     }
     
     // Clean up
@@ -783,148 +809,191 @@ function detectDrapeArea(srcMat) {
     return maxArea;
 }
 
-// Create processed image with highlights
+// FIXED: Create processed image with highlights
 function createProcessedImage() {
-    if (!originalImageMat || !referencePoint) return;
+    if (!originalImageMat || !referencePoint) {
+        console.error('Cannot create processed image: missing data');
+        return;
+    }
     
     const processedCanvas = document.getElementById('processedCanvas');
     const displayCtx = processedCanvas.getContext('2d');
     
-    // Set canvas dimensions
-    processedCanvas.width = originalImageMat.cols * displayScale;
-    processedCanvas.height = originalImageMat.rows * displayScale;
+    // Set canvas dimensions to match display dimensions
+    processedCanvas.width = displayWidth;
+    processedCanvas.height = displayHeight;
     
-    // Convert OpenCV Mat to ImageData for display
-    let displayMat = new cv.Mat();
-    cv.resize(originalImageMat, displayMat, 
-        new cv.Size(processedCanvas.width, processedCanvas.height),
-        0, 0, cv.INTER_LINEAR
-    );
+    // Clear canvas
+    displayCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
     
-    // Convert to RGB for drawing
-    cv.cvtColor(displayMat, displayMat, cv.COLOR_RGBA2RGB);
-    
-    // Create ImageData
-    const imageData = new ImageData(
-        new Uint8ClampedArray(displayMat.data),
-        displayMat.cols,
-        displayMat.rows
-    );
-    
-    // Draw original image
-    displayCtx.putImageData(imageData, 0, 0);
-    
-    // Highlight drape area if contour is available
-    if (window.largestContour) {
+    try {
+        // Create a copy of the original image for display
+        let displayMat = new cv.Mat();
+        
+        // Resize for display
+        cv.resize(originalImageMat, displayMat, 
+            new cv.Size(displayWidth, displayHeight),
+            0, 0, cv.INTER_LINEAR
+        );
+        
+        // Convert to RGBA for canvas
+        cv.cvtColor(displayMat, displayMat, cv.COLOR_RGB2RGBA);
+        
+        // FIXED: Create ImageData with correct dimensions
+        const imageData = new ImageData(
+            new Uint8ClampedArray(displayMat.data),
+            displayMat.cols,
+            displayMat.rows
+        );
+        
+        console.log('Creating ImageData:', {
+            dataLength: displayMat.data.length,
+            expected: displayMat.cols * displayMat.rows * 4,
+            cols: displayMat.cols,
+            rows: displayMat.rows
+        });
+        
+        // Draw the base image
+        displayCtx.putImageData(imageData, 0, 0);
+        
+        // Highlight drape area if contour is available
+        if (window.largestContour) {
+            displayCtx.save();
+            
+            // Scale the contour points to display dimensions
+            const contour = window.largestContour;
+            const scaleX = displayWidth / actualWidth;
+            const scaleY = displayHeight / actualHeight;
+            
+            displayCtx.beginPath();
+            
+            // Convert contour points to path
+            let firstPoint = true;
+            for (let i = 0; i < contour.data32S.length; i += 2) {
+                const x = contour.data32S[i] * scaleX;
+                const y = contour.data32S[i + 1] * scaleY;
+                
+                if (firstPoint) {
+                    displayCtx.moveTo(x, y);
+                    firstPoint = false;
+                } else {
+                    displayCtx.lineTo(x, y);
+                }
+            }
+            
+            // Close the path
+            if (contour.data32S.length > 0) {
+                const firstX = contour.data32S[0] * scaleX;
+                const firstY = contour.data32S[1] * scaleY;
+                displayCtx.lineTo(firstX, firstY);
+            }
+            
+            displayCtx.closePath();
+            
+            // Fill with semi-transparent red
+            displayCtx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            displayCtx.fill();
+            
+            // Draw contour outline
+            displayCtx.strokeStyle = '#ff0000';
+            displayCtx.lineWidth = 3;
+            displayCtx.stroke();
+            
+            displayCtx.restore();
+        }
+        
+        // Highlight reference point
         displayCtx.save();
         
-        // Scale context for contour drawing
-        displayCtx.scale(displayScale, displayScale);
+        const displayX = referencePoint.displayX;
+        const displayY = referencePoint.displayY;
         
-        // Draw drape area with transparency
+        // Draw reference point circle
         displayCtx.beginPath();
-        
-        // Convert contour points to path
-        const contour = window.largestContour;
-        const points = [];
-        
-        for (let i = 0; i < contour.data32S.length; i += 2) {
-            const x = contour.data32S[i];
-            const y = contour.data32S[i + 1];
-            points.push({x, y});
-            
-            if (i === 0) {
-                displayCtx.moveTo(x, y);
-            } else {
-                displayCtx.lineTo(x, y);
-            }
-        }
-        
-        if (points.length > 0) {
-            displayCtx.lineTo(points[0].x, points[0].y);
-        }
-        
-        // Fill with semi-transparent color
-        displayCtx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+        displayCtx.arc(displayX, displayY, 12, 0, Math.PI * 2);
+        displayCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
         displayCtx.fill();
-        
-        // Draw contour outline
-        displayCtx.strokeStyle = '#ff0000';
-        displayCtx.lineWidth = 3;
+        displayCtx.strokeStyle = '#00ff00';
+        displayCtx.lineWidth = 2;
         displayCtx.stroke();
         
+        // Draw crosshair
+        displayCtx.beginPath();
+        displayCtx.moveTo(displayX - 10, displayY);
+        displayCtx.lineTo(displayX + 10, displayY);
+        displayCtx.moveTo(displayX, displayY - 10);
+        displayCtx.lineTo(displayX, displayY + 10);
+        displayCtx.strokeStyle = '#00ff00';
+        displayCtx.lineWidth = 2;
+        displayCtx.stroke();
+        
+        // Draw center dot
+        displayCtx.beginPath();
+        displayCtx.arc(displayX, displayY, 3, 0, Math.PI * 2);
+        displayCtx.fillStyle = '#00ff00';
+        displayCtx.fill();
+        
+        // Add label
+        displayCtx.font = 'bold 12px Arial';
+        const text = 'REF';
+        const textWidth = displayCtx.measureText(text).width;
+        
+        // Draw text background
+        displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        displayCtx.fillRect(displayX - textWidth/2 - 5, displayY - 35, textWidth + 10, 18);
+        
+        // Draw text
+        displayCtx.fillStyle = '#ffffff';
+        displayCtx.textAlign = 'center';
+        displayCtx.fillText(text, displayX, displayY - 25);
+        
         displayCtx.restore();
+        
+        // Add measurement information
+        displayCtx.save();
+        displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        displayCtx.fillRect(10, 10, 250, 80);
+        
+        displayCtx.fillStyle = 'white';
+        displayCtx.font = 'bold 14px Arial';
+        displayCtx.fillText('Measurement Results', 20, 30);
+        
+        displayCtx.font = '12px Arial';
+        const area = document.getElementById('actualArea').textContent;
+        const drape = document.getElementById('drapeCoefficient').textContent;
+        displayCtx.fillText(`Area: ${area} cm²`, 20, 50);
+        displayCtx.fillText(`Drape: ${drape}`, 20, 70);
+        
+        displayCtx.restore();
+        
+        // Show processed canvas
+        processedCanvas.style.display = 'block';
+        
+        // Clean up
+        displayMat.delete();
+        
+    } catch (error) {
+        console.error('Error creating processed image:', error);
+        
+        // Fallback: Just draw the original image
+        const originalCanvas = document.getElementById('originalCanvas');
+        displayCtx.drawImage(originalCanvas, 0, 0, displayWidth, displayHeight);
+        
+        // Add error message
+        displayCtx.save();
+        displayCtx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+        displayCtx.fillRect(10, 10, 300, 60);
+        
+        displayCtx.fillStyle = 'white';
+        displayCtx.font = 'bold 14px Arial';
+        displayCtx.fillText('Error Processing Image', 20, 30);
+        displayCtx.font = '12px Arial';
+        displayCtx.fillText('Results are still available', 20, 50);
+        
+        displayCtx.restore();
+        
+        processedCanvas.style.display = 'block';
     }
-    
-    // Highlight reference point
-    displayCtx.save();
-    
-    const displayX = referencePoint.displayX;
-    const displayY = referencePoint.displayY;
-    
-    // Draw reference point circle
-    displayCtx.beginPath();
-    displayCtx.arc(displayX, displayY, 12, 0, Math.PI * 2);
-    displayCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
-    displayCtx.fill();
-    displayCtx.strokeStyle = '#00ff00';
-    displayCtx.lineWidth = 2;
-    displayCtx.stroke();
-    
-    // Draw crosshair
-    displayCtx.beginPath();
-    displayCtx.moveTo(displayX - 10, displayY);
-    displayCtx.lineTo(displayX + 10, displayY);
-    displayCtx.moveTo(displayX, displayY - 10);
-    displayCtx.lineTo(displayX, displayY + 10);
-    displayCtx.strokeStyle = '#00ff00';
-    displayCtx.lineWidth = 2;
-    displayCtx.stroke();
-    
-    // Draw center dot
-    displayCtx.beginPath();
-    displayCtx.arc(displayX, displayY, 3, 0, Math.PI * 2);
-    displayCtx.fillStyle = '#00ff00';
-    displayCtx.fill();
-    
-    // Add label
-    displayCtx.font = 'bold 12px Arial';
-    const text = 'REF';
-    const textWidth = displayCtx.measureText(text).width;
-    
-    // Draw text background
-    displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    displayCtx.fillRect(displayX - textWidth/2 - 5, displayY - 35, textWidth + 10, 18);
-    
-    // Draw text
-    displayCtx.fillStyle = '#ffffff';
-    displayCtx.textAlign = 'center';
-    displayCtx.fillText(text, displayX, displayY - 25);
-    
-    displayCtx.restore();
-    
-    // Add measurement information
-    displayCtx.save();
-    displayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    displayCtx.fillRect(10, 10, 250, 80);
-    
-    displayCtx.fillStyle = 'white';
-    displayCtx.font = 'bold 14px Arial';
-    displayCtx.fillText('Measurement Results', 20, 30);
-    
-    displayCtx.font = '12px Arial';
-    const area = document.getElementById('actualArea').textContent;
-    const drape = document.getElementById('drapeCoefficient').textContent;
-    displayCtx.fillText(`Area: ${area} cm²`, 20, 50);
-    displayCtx.fillText(`Drape: ${drape}`, 20, 70);
-    
-    displayCtx.restore();
-    
-    // Show processed canvas
-    processedCanvas.style.display = 'block';
-    
-    // Clean up
-    displayMat.delete();
 }
 
 // Get reference diameter based on type
@@ -1191,6 +1260,10 @@ function resetApp() {
     isProcessing = false;
     displayScale = 1;
     imageDataURL = null;
+    displayWidth = 0;
+    displayHeight = 0;
+    actualWidth = 0;
+    actualHeight = 0;
     
     // Update UI
     updateUIState();
