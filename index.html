@@ -9,9 +9,6 @@
     <!-- Load OpenCV.js from reliable CDN -->
     <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Load utility scripts FIRST -->
-    <script src="utils.js"></script>
 </head>
 <body>
     <div class="container">
@@ -36,8 +33,8 @@
         <!-- Camera Section -->
         <div class="card">
             <div class="camera-container">
-                <video id="video" autoplay playsinline></video>
-                <canvas id="canvas" style="display:none;"></canvas>
+                <video id="cameraVideo" autoplay playsinline></video>
+                <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <canvas id="outputCanvas" style="display:none;"></canvas>
                 
                 <!-- Level Indicator -->
@@ -53,9 +50,6 @@
                     <div class="target-circle"></div>
                     <div class="crosshair"></div>
                 </div>
-                
-                <!-- Grid Overlay for precision -->
-                <div class="canvas-grid-overlay"></div>
             </div>
             
             <div class="controls">
@@ -159,10 +153,10 @@
                     <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1" min="1">
                 </div>
             </div>
-            <button id="calculateDrape" class="btn btn-info">
+            <button id="calculateDrape" class="btn btn-info" disabled>
                 <i class="fas fa-calculator"></i> Calculate Drape %
             </button>
-            <button id="autoCalculate" class="btn btn-outline">
+            <button id="autoCalculate" class="btn btn-outline" disabled>
                 <i class="fas fa-robot"></i> Auto Calculate
             </button>
         </div>
@@ -192,47 +186,8 @@
         </div>
     </div>
 
-    <!-- Load main script LAST -->
+    <!-- Load scripts -->
+    <script src="utils.js"></script>
     <script src="script.js"></script>
-    
-    <!-- Initialize device orientation (leveler) -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeDeviceOrientation();
-        });
-        
-        function initializeDeviceOrientation() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && 
-                typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS 13+ devices need permission
-                document.getElementById('startCamera').addEventListener('click', function() {
-                    DeviceOrientationEvent.requestPermission()
-                        .then(permissionState => {
-                            if (permissionState === 'granted') {
-                                startDeviceOrientation();
-                            }
-                        })
-                        .catch(console.error);
-                });
-            } else {
-                // Android and other devices
-                window.addEventListener('deviceorientation', handleDeviceOrientation);
-            }
-        }
-        
-        function startDeviceOrientation() {
-            window.addEventListener('deviceorientation', handleDeviceOrientation);
-        }
-        
-        function handleDeviceOrientation(event) {
-            const beta = event.beta;  // front-to-back tilt
-            const gamma = event.gamma; // left-to-right tilt
-            
-            if (beta !== null && gamma !== null) {
-                const angle = Math.sqrt(beta * beta + gamma * gamma);
-                UIUtils.updateLevelIndicator(angle, beta, gamma);
-            }
-        }
-    </script>
 </body>
 </html>
