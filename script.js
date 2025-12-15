@@ -27,14 +27,26 @@ function onOpenCvReady() {
 function initializeApp() {
     console.log('Initializing Drape Calculator...');
     
+    // Check if OpenCV is loaded
     if (!cv) {
+        console.error('OpenCV not loaded yet');
         document.getElementById('status').textContent = 'Loading OpenCV...';
         return;
     }
     
+    // Set up all event listeners
     setupEventListeners();
+    
+    // ADD THIS LINE: Setup diagnostic listeners
+    setupDiagnosticListeners();
+    
+    // Load history from localStorage
     loadHistory();
+    
+    // Update UI state
     updateUIState();
+    
+    // Initialize device orientation
     initializeLevelIndicator();
     
     console.log('App initialized successfully');
