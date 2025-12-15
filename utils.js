@@ -214,6 +214,7 @@ const FileUtils = {
 };
 
 // Drape calculation formulas
+// Drape calculation formulas - UPDATED coin diameters
 const DrapeFormulas = {
     // Calculate area from diameter
     circleArea: function(diameter) {
@@ -244,6 +245,20 @@ const DrapeFormulas = {
     pixelToCmRatio: function(referencePixelDiameter, referenceActualDiameter) {
         if (referencePixelDiameter <= 0) return 1;
         return referenceActualDiameter / referencePixelDiameter;
+    },
+    
+    // Get reference diameter based on type - UPDATED
+    getReferenceDiameter: function(refType, customDiameter = 2.5) {
+        switch(refType) {
+            case 'coin2':
+                return 2.5; // Indian 2 Rupee Coin
+            case 'coin10':
+                return 2.7; // Indian 10 Rupee Coin
+            case 'custom':
+                return customDiameter;
+            default:
+                return 2.5; // Default to 2 Rupee coin
+        }
     }
 };
 
