@@ -9,6 +9,9 @@
     <!-- Load OpenCV.js from reliable CDN -->
     <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Load utility scripts FIRST -->
+    <script src="utils.js"></script>
 </head>
 <body>
     <div class="container">
@@ -33,7 +36,6 @@
         <!-- Camera Section -->
         <div class="card">
             <div class="camera-container">
-<div class="canvas-grid-overlay"></div>
                 <video id="video" autoplay playsinline></video>
                 <canvas id="canvas" style="display:none;"></canvas>
                 <canvas id="outputCanvas" style="display:none;"></canvas>
@@ -51,6 +53,9 @@
                     <div class="target-circle"></div>
                     <div class="crosshair"></div>
                 </div>
+                
+                <!-- Grid Overlay for precision -->
+                <div class="canvas-grid-overlay"></div>
             </div>
             
             <div class="controls">
@@ -187,8 +192,37 @@
         </div>
     </div>
 
-    <!-- JavaScript Files -->
-    <script src="utils.js"></script>
+    <!-- Load main script LAST -->
     <script src="script.js"></script>
+    
+    <!-- Debug script to check if buttons work -->
+    <script>
+        // Debug: Check if buttons exist and can be clicked
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM fully loaded');
+            
+            // Quick test of buttons
+            const testButtons = ['startCamera', 'uploadImage', 'reset', 'calculateDrape', 'autoCalculate', 'exportData', 'clearHistory'];
+            
+            testButtons.forEach(buttonId => {
+                const btn = document.getElementById(buttonId);
+                if (btn) {
+                    console.log(`Button ${buttonId} found:`, btn);
+                    // Add a test click handler
+                    btn.addEventListener('click', function(e) {
+                        console.log(`Button ${buttonId} clicked`);
+                    });
+                } else {
+                    console.error(`Button ${buttonId} NOT FOUND!`);
+                }
+            });
+            
+            // Test file input
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) {
+                console.log('File input found');
+            }
+        });
+    </script>
 </body>
 </html>
