@@ -4,6 +4,54 @@
 /* ================================
    CAMERA + UPLOAD RESTORE LAYER
    ================================ */
+/* =========================================================
+   HARD FIX: GUARANTEED IMAGE UPLOAD INITIALIZATION
+   (Does NOT remove or replace existing code)
+   ========================================================= */
+
+document.addEventListener("DOMContentLoaded", function () {
+
+  const uploadBtn = document.getElementById("uploadImage");
+  const fileInput = document.getElementById("fileInput");
+
+  if (!uploadBtn || !fileInput) {
+    console.error("Upload button or file input missing in DOM");
+    return;
+  }
+
+  // Force file picker
+  uploadBtn.addEventListener("click", function () {
+    fileInput.value = ""; // IMPORTANT: allow re-upload of same image
+    fileInput.click();
+  });
+
+  // Handle selected file
+  fileInput.addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image file");
+      return;
+    }
+
+    const img = new Image();
+    img.onload = function () {
+      if (typeof processUploadedImage === "function") {
+        processUploadedImage(img);
+      } else {
+        console.error("processUploadedImage() not found");
+      }
+    };
+
+    img.onerror = function () {
+      alert("Failed to load image");
+    };
+
+    img.src = URL.createObjectURL(file);
+  });
+
+});
 
 let videoStream = null;
 
