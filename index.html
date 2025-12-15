@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Drape Area Calculator</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Load OpenCV.js from reliable CDN -->
     <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -14,35 +12,37 @@
     <div class="container">
         <header>
             <h1><i class="fas fa-ruler-combined"></i> Drape Area Calculator</h1>
-            <p class="subtitle">Department of Textile & Fiber Engineering, IIT Delhi, Hauz Khas, New Delhi, 110016</p>
-            <p class="subtitle">Measure fabric drape area using camera or upload images</p>
+            <p class="subtitle">Department of Textile & Fiber Engineering</p>
+            <p class="subtitle">Measure fabric drape coefficient using image analysis</p>
         </header>
 
         <!-- Setup Instructions -->
         <div class="card instructions">
-            <h2><i class="fas fa-info-circle"></i> Setup Instructions</h2>
+            <h2><i class="fas fa-info-circle"></i> How to Use</h2>
             <ol>
-                <li>Position phone directly above drape tester (use level guide)</li>
-                <li>Place a coin (for scale) next to drape</li>
+                <li>Position phone directly above drape tester</li>
+                <li>Place a reference coin next to drape for scale</li>
                 <li>Ensure good lighting and contrast</li>
-                <li>Use "Start Camera" or "Upload Image"</li>
-                <li>Click on reference object (coin) after capture</li>
+                <li>Click "Start Camera" or "Upload Image"</li>
+                <li>After capture, click on the reference coin</li>
+                <li>Enter drape tester diameters and click "Calculate Drape %"</li>
             </ol>
         </div>
 
-        <!-- Camera Section -->
+        <!-- Camera & Upload Section -->
         <div class="card">
+            <h3><i class="fas fa-camera"></i> Capture Image</h3>
             <div class="camera-container">
-                <video id="cameraVideo" autoplay playsinline></video>
-                <canvas id="cameraCanvas" style="display:none;"></canvas>
-                <canvas id="outputCanvas" style="display:none;"></canvas>
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+                <canvas id="outputCanvas" class="display-canvas" style="display:none;"></canvas>
                 
                 <!-- Level Indicator -->
                 <div class="level-indicator">
                     <div class="level-bubble">
                         <div class="bubble-center"></div>
                     </div>
-                    <div class="level-text">Level: <span id="levelStatus">--</span>°</div>
+                    <div class="level-text">Angle: <span id="levelStatus">0.0</span>°</div>
                 </div>
                 
                 <!-- Overlay -->
@@ -60,7 +60,7 @@
                     <i class="fas fa-upload"></i> Upload Image
                 </button>
                 <button id="capture" class="btn btn-success" disabled>
-                    <i class="fas fa-camera-retro"></i> Capture & Analyze
+                    <i class="fas fa-camera-retro"></i> Capture
                 </button>
                 <button id="reset" class="btn btn-secondary" disabled>
                     <i class="fas fa-redo"></i> Reset
@@ -71,44 +71,42 @@
             <input type="file" id="fileInput" accept="image/*" style="display: none;">
         </div>
 
-        <!-- Reference Input -->
+        <!-- Reference & Settings -->
         <div class="card">
-            <h3><i class="fas fa-balance-scale"></i> Reference Scale</h3>
-            <div class="form-group">
-                <label for="refType">Reference Object:</label>
-                <select id="refType" class="form-control">
-                    <option value="coin2">Indian 2 Rupee Coin (2.5 cm)</option>
-                    <option value="coin10">Indian 10 Rupee Coin (2.7 cm)</option>
-                    <option value="custom">Custom Size</option>
-                </select>
-            </div>
+            <h3><i class="fas fa-cog"></i> Settings</h3>
             
-            <div id="customRef" style="display:none;">
+            <div class="form-row">
                 <div class="form-group">
-                    <label for="refDiameter">Diameter (cm):</label>
-                    <input type="number" id="refDiameter" class="form-control" step="0.1" min="0.1" value="2.5">
+                    <label for="refType">Reference Object:</label>
+                    <select id="refType" class="form-control">
+                        <option value="2.5">Indian 2 Rupee Coin (2.5 cm)</option>
+                        <option value="2.7">Indian 10 Rupee Coin (2.7 cm)</option>
+                        <option value="custom">Custom Size</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="customRefGroup" style="display:none;">
+                    <label for="refDiameter">Custom Diameter (cm):</label>
+                    <input type="number" id="refDiameter" class="form-control" step="0.1" min="0.5" value="2.5">
                 </div>
             </div>
             
-            <div class="form-group">
-                <label>Image Analysis:</label>
-                <div class="checkbox-group">
-                    <label>
-                        <input type="checkbox" id="autoHighlight" checked>
-                        Auto-highlight drape area
-                    </label>
-                    <label>
-                        <input type="checkbox" id="autoDetectReference">
-                        Auto-detect reference object
-                    </label>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="diskDiameter">Support Disk Diameter (cm):</label>
+                    <input type="number" id="diskDiameter" class="form-control" value="18.0" step="0.1" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="fabricDiameter">Fabric Diameter (cm):</label>
+                    <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1" min="1">
                 </div>
             </div>
         </div>
 
-        <!-- Results Section -->
+        <!-- Results -->
         <div class="card">
             <h2><i class="fas fa-chart-bar"></i> Results</h2>
-            <div id="results" class="results-container">
+            <div class="results-container">
                 <div class="result-item">
                     <span class="label">Pixel Area:</span>
                     <span id="pixelArea" class="value">--</span>
@@ -127,10 +125,15 @@
                 </div>
             </div>
             
-            <!-- Visual Output -->
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="calculateDrape" class="btn btn-info" disabled>
+                    <i class="fas fa-calculator"></i> Calculate Drape %
+                </button>
+            </div>
+            
             <div class="image-comparison">
                 <div class="image-box">
-                    <h4>Original</h4>
+                    <h4>Captured Image</h4>
                     <canvas id="originalCanvas" class="display-canvas"></canvas>
                 </div>
                 <div class="image-box">
@@ -138,27 +141,6 @@
                     <canvas id="processedCanvas" class="display-canvas"></canvas>
                 </div>
             </div>
-        </div>
-
-        <!-- Drape Tester Settings -->
-        <div class="card">
-            <h3><i class="fas fa-cogs"></i> Drape Tester Settings</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="diskDiameter">Support Disk Diameter (cm):</label>
-                    <input type="number" id="diskDiameter" class="form-control" value="18.0" step="0.1" min="1">
-                </div>
-                <div class="form-group">
-                    <label for="fabricDiameter">Fabric Diameter (cm):</label>
-                    <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1" min="1">
-                </div>
-            </div>
-            <button id="calculateDrape" class="btn btn-info" disabled>
-                <i class="fas fa-calculator"></i> Calculate Drape %
-            </button>
-            <button id="autoCalculate" class="btn btn-outline" disabled>
-                <i class="fas fa-robot"></i> Auto Calculate
-            </button>
         </div>
 
         <!-- History -->
@@ -174,20 +156,20 @@
                     </tr>
                 </thead>
                 <tbody id="historyBody">
-                    <!-- Will be populated by JS -->
+                    <!-- History will be loaded here -->
                 </tbody>
             </table>
-            <button id="exportData" class="btn btn-outline">
-                <i class="fas fa-download"></i> Export CSV
-            </button>
-            <button id="clearHistory" class="btn btn-small" style="margin-left: 10px;">
-                <i class="fas fa-trash"></i> Clear History
-            </button>
+            <div style="margin-top: 15px;">
+                <button id="exportData" class="btn btn-outline">
+                    <i class="fas fa-download"></i> Export CSV
+                </button>
+                <button id="clearHistory" class="btn btn-small" style="margin-left: 10px;">
+                    <i class="fas fa-trash"></i> Clear History
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Load scripts -->
-    <script src="utils.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
