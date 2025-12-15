@@ -63,6 +63,52 @@ const ImageUtils = {
             x: normX * maxMovement,
             y: normY * maxMovement
         };
+    },
+    
+    // Calculate precise canvas click coordinates
+    calculateCanvasClick: function(event, canvas, actualWidth, actualHeight) {
+        const rect = canvas.getBoundingClientRect();
+        const offsetX = parseFloat(canvas.dataset.offsetX) || 0;
+        const offsetY = parseFloat(canvas.dataset.offsetY) || 0;
+        const renderedWidth = parseFloat(canvas.dataset.renderedWidth) || rect.width;
+        const renderedHeight = parseFloat(canvas.dataset.renderedHeight) || rect.height;
+        
+        // Get click position
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        
+        // Calculate position within rendered image
+        const renderedX = clickX - offsetX;
+        const renderedY = clickY - offsetY;
+        
+        // Calculate scale factors
+        const scaleX = actualWidth / renderedWidth;
+        const scaleY = actualHeight / renderedHeight;
+        
+        // Calculate actual coordinates
+        const actualX = Math.round(renderedX * scaleX);
+        const actualY = Math.round(renderedY * scaleY);
+        
+        // Clamp to canvas bounds
+        const clampedX = Math.max(0, Math.min(actualX, actualWidth - 1));
+        const clampedY = Math.max(0, Math.min(actualY, actualHeight - 1));
+        
+        return {
+            clickX: clickX,
+            clickY: clickY,
+            renderedX: renderedX,
+            renderedY: renderedY,
+            actualX: clampedX,
+            actualY: clampedY,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            offsetX: offsetX,
+            offsetY: offsetY,
+            isWithinImage: (
+                renderedX >= 0 && renderedX <= renderedWidth &&
+                renderedY >= 0 && renderedY <= renderedHeight
+            )
+        };
     }
 };
 
@@ -338,6 +384,10 @@ const DeviceUtils = {
                (window.DeviceOrientationEvent !== undefined);
     },
     
+    hasCamera: function() {
+        return navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    },
+    
     requestAccelerometerPermission: function() {
         return new Promise((resolve) => {
             if (typeof DeviceOrientationEvent !== 'undefined' && 
@@ -357,59 +407,340 @@ const DeviceUtils = {
                 resolve(true);
             }
         });
+    },
+    
+    requestCameraPermission: function() {
+        return new Promise((resolve) => {
+            if (!this.hasCamera()) {
+                resolve(false);
+                return;
+            }
+            
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    // Stop the stream immediately after permission is granted
+                    stream.getTracks().forEach(track => track.stop());
+                    resolve(true);
+                })
+                .catch(error => {
+                    console.error('Camera permission denied:', error);
+                    resolve(false);
+                });
+        });
     }
 };
 
-const ImageUtils = {
-    // ... existing functions ...
+// Camera utilities
+const CameraUtils = {
+    stream: null,
+    videoElement: null,
+    canvasElement: null,
     
-    // Calculate precise canvas click coordinates
-    calculateCanvasClick: function(event, canvas, actualWidth, actualHeight) {
-        const rect = canvas.getBoundingClientRect();
-        const offsetX = parseFloat(canvas.dataset.offsetX) || 0;
-        const offsetY = parseFloat(canvas.dataset.offsetY) || 0;
-        const renderedWidth = parseFloat(canvas.dataset.renderedWidth) || rect.width;
-        const renderedHeight = parseFloat(canvas.dataset.renderedHeight) || rect.height;
+    // Initialize camera
+    initCamera: function(videoId = 'cameraVideo', canvasId = 'cameraCanvas') {
+        this.videoElement = document.getElementById(videoId);
+        this.canvasElement = document.getElementById(canvasId);
         
-        // Get click position
-        const clickX = event.clientX - rect.left;
-        const clickY = event.clientY - rect.top;
+        if (!this.videoElement) {
+            console.error('Video element not found');
+            return Promise.reject('Video element not found');
+        }
         
-        // Calculate position within rendered image
-        const renderedX = clickX - offsetX;
-        const renderedY = clickY - offsetY;
+        if (!this.canvasElement) {
+            console.error('Canvas element not found');
+            return Promise.reject('Canvas element not found');
+        }
         
-        // Calculate scale factors
-        const scaleX = actualWidth / renderedWidth;
-        const scaleY = actualHeight / renderedHeight;
-        
-        // Calculate actual coordinates
-        const actualX = Math.round(renderedX * scaleX);
-        const actualY = Math.round(renderedY * scaleY);
-        
-        // Clamp to canvas bounds
-        const clampedX = Math.max(0, Math.min(actualX, actualWidth - 1));
-        const clampedY = Math.max(0, Math.min(actualY, actualHeight - 1));
-        
-        return {
-            clickX: clickX,
-            clickY: clickY,
-            renderedX: renderedX,
-            renderedY: renderedY,
-            actualX: clampedX,
-            actualY: clampedY,
-            scaleX: scaleX,
-            scaleY: scaleY,
-            offsetX: offsetX,
-            offsetY: offsetY,
-            isWithinImage: (
-                renderedX >= 0 && renderedX <= renderedWidth &&
-                renderedY >= 0 && renderedY <= renderedHeight
-            )
-        };
+        return this.startCamera();
     },
     
-  
+    // Start camera stream
+    startCamera: function() {
+        return new Promise((resolve, reject) => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                reject('Camera not supported on this device');
+                return;
+            }
+            
+            // Stop existing stream if any
+            if (this.stream) {
+                this.stopCamera();
+            }
+            
+            const constraints = {
+                video: {
+                    facingMode: 'environment', // Prefer rear camera
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                },
+                audio: false
+            };
+            
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(stream => {
+                    this.stream = stream;
+                    this.videoElement.srcObject = stream;
+                    
+                    this.videoElement.onloadedmetadata = () => {
+                        // Set canvas dimensions to match video
+                        this.canvasElement.width = this.videoElement.videoWidth;
+                        this.canvasElement.height = this.videoElement.videoHeight;
+                        
+                        // Start video playback
+                        this.videoElement.play()
+                            .then(() => {
+                                resolve({
+                                    width: this.videoElement.videoWidth,
+                                    height: this.videoElement.videoHeight
+                                });
+                            })
+                            .catch(reject);
+                    };
+                })
+                .catch(error => {
+                    console.error('Error accessing camera:', error);
+                    
+                    // Try with less restrictive constraints
+                    const fallbackConstraints = { video: true };
+                    
+                    navigator.mediaDevices.getUserMedia(fallbackConstraints)
+                        .then(stream => {
+                            this.stream = stream;
+                            this.videoElement.srcObject = stream;
+                            
+                            this.videoElement.onloadedmetadata = () => {
+                                this.canvasElement.width = this.videoElement.videoWidth;
+                                this.canvasElement.height = this.videoElement.videoHeight;
+                                
+                                this.videoElement.play()
+                                    .then(() => {
+                                        resolve({
+                                            width: this.videoElement.videoWidth,
+                                            height: this.videoElement.videoHeight
+                                        });
+                                    })
+                                    .catch(reject);
+                            };
+                        })
+                        .catch(fallbackError => {
+                            reject(`Camera access denied: ${fallbackError.message}`);
+                        });
+                });
+        });
+    },
+    
+    // Stop camera stream
+    stopCamera: function() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => {
+                track.stop();
+            });
+            this.stream = null;
+        }
+        
+        if (this.videoElement) {
+            this.videoElement.srcObject = null;
+        }
+    },
+    
+    // Capture photo from camera
+    capturePhoto: function() {
+        return new Promise((resolve, reject) => {
+            if (!this.canvasElement || !this.videoElement) {
+                reject('Camera not initialized');
+                return;
+            }
+            
+            const ctx = this.canvasElement.getContext('2d');
+            
+            // Draw video frame to canvas
+            ctx.drawImage(
+                this.videoElement, 
+                0, 0, 
+                this.canvasElement.width, 
+                this.canvasElement.height
+            );
+            
+            // Create an image from the canvas
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject('Failed to create image from canvas');
+            image.src = this.canvasElement.toDataURL('image/png');
+        });
+    },
+    
+    // Get camera status
+    isCameraActive: function() {
+        return this.stream !== null && this.stream.active;
+    },
+    
+    // Switch camera (front/back)
+    switchCamera: function() {
+        if (!this.stream) return Promise.reject('No active camera stream');
+        
+        const currentTrack = this.stream.getVideoTracks()[0];
+        if (!currentTrack) return Promise.reject('No video track found');
+        
+        const currentFacingMode = currentTrack.getSettings().facingMode;
+        const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+        
+        this.stopCamera();
+        
+        const constraints = {
+            video: {
+                facingMode: newFacingMode,
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            },
+            audio: false
+        };
+        
+        return this.startCamera(constraints);
+    }
+};
+
+// Upload utilities
+const UploadUtils = {
+    // Handle file upload
+    handleFileUpload: function(event, maxSizeMB = 5) {
+        return new Promise((resolve, reject) => {
+            const file = event.target.files[0];
+            
+            if (!file) {
+                reject('No file selected');
+                return;
+            }
+            
+            // Check file type
+            const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp'];
+            if (!validTypes.includes(file.type)) {
+                reject('Invalid file type. Please upload an image (JPEG, PNG, WebP, BMP)');
+                return;
+            }
+            
+            // Check file size
+            const maxSize = maxSizeMB * 1024 * 1024; // Convert to bytes
+            if (file.size > maxSize) {
+                reject(`File is too large. Maximum size is ${maxSizeMB}MB`);
+                return;
+            }
+            
+            // Create image from file
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    resolve({
+                        image: img,
+                        fileName: file.name,
+                        fileSize: file.size,
+                        fileType: file.type
+                    });
+                };
+                img.onerror = function() {
+                    reject('Failed to load image');
+                };
+                img.src = e.target.result;
+            };
+            
+            reader.onerror = function() {
+                reject('Failed to read file');
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    },
+    
+    // Create upload button
+    createUploadButton: function(callback, accept = 'image/*', multiple = false) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = accept;
+        input.multiple = multiple;
+        input.style.display = 'none';
+        
+        input.onchange = function(event) {
+            if (callback && typeof callback === 'function') {
+                callback(event);
+            }
+        };
+        
+        document.body.appendChild(input);
+        return input;
+    },
+    
+    // Trigger upload button click
+    triggerUpload: function(uploadButtonId = 'uploadInput') {
+        const uploadButton = document.getElementById(uploadButtonId);
+        if (uploadButton) {
+            uploadButton.click();
+        } else {
+            console.error('Upload button not found');
+        }
+    },
+    
+    // Process multiple files
+    processMultipleFiles: function(files, maxSizeMB = 5) {
+        return new Promise((resolve, reject) => {
+            const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp'];
+            const maxSize = maxSizeMB * 1024 * 1024;
+            
+            const promises = Array.from(files).map(file => {
+                return new Promise((fileResolve, fileReject) => {
+                    // Validate file type
+                    if (!validTypes.includes(file.type)) {
+                        fileReject(`Invalid file type: ${file.name}`);
+                        return;
+                    }
+                    
+                    // Validate file size
+                    if (file.size > maxSize) {
+                        fileReject(`File too large: ${file.name}`);
+                        return;
+                    }
+                    
+                    // Read file
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = new Image();
+                        img.onload = function() {
+                            fileResolve({
+                                image: img,
+                                fileName: file.name,
+                                fileSize: file.size,
+                                fileType: file.type
+                            });
+                        };
+                        img.onerror = function() {
+                            fileReject(`Failed to load image: ${file.name}`);
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.onerror = function() {
+                        fileReject(`Failed to read file: ${file.name}`);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+            
+            Promise.allSettled(promises)
+                .then(results => {
+                    const successful = results
+                        .filter(result => result.status === 'fulfilled')
+                        .map(result => result.value);
+                    
+                    const failed = results
+                        .filter(result => result.status === 'rejected')
+                        .map(result => result.reason);
+                    
+                    resolve({
+                        images: successful,
+                        errors: failed
+                    });
+                });
+        });
+    }
 };
 
 // Export all utilities
@@ -419,3 +750,5 @@ window.FileUtils = FileUtils;
 window.DrapeFormulas = DrapeFormulas;
 window.UIUtils = UIUtils;
 window.DeviceUtils = DeviceUtils;
+window.CameraUtils = CameraUtils;
+window.UploadUtils = UploadUtils;
