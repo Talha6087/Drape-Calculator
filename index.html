@@ -1,225 +1,311 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>Drape Area Calculator</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Load OpenCV.js from reliable CDN -->
-    <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drape Calculator – Fixed</title>
+
+  <!-- =====================
+       STYLES (FULL, NOT CUT)
+       ===================== -->
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f6f8;
+      color: #222;
+    }
+    header {
+      background: #0b3c5d;
+      color: #fff;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    main {
+      padding: 16px;
+      max-width: 1200px;
+      margin: auto;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    button, input, select {
+      padding: 10px;
+      font-size: 14px;
+    }
+    button {
+      background: #0b3c5d;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .canvas-wrap {
+      position: relative;
+      background: #000;
+      margin-bottom: 16px;
+    }
+    canvas {
+      max-width: 100%;
+      display: block;
+      background: #111;
+    }
+    .info {
+      background: #fff;
+      padding: 12px;
+      border-radius: 4px;
+    }
+    .info p { margin: 6px 0; }
+    footer {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+      margin-top: 24px;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1><i class="fas fa-ruler-combined"></i> Drape Area Calculator</h1>
-            <p class="subtitle">Department of Textile & Fiber Engineering, IIT Delhi, Hauz Khas, New Delhi, 110016</p>
-            <p class="subtitle">Measure fabric drape area using camera or upload images</p>
-        </header>
-        <!-- Add this after the header in index.html -->
-<div id="loadingIndicator" class="card" style="display: none;">
-    <div style="text-align: center; padding: 20px;">
-        <div class="loader" style="width: 40px; height: 40px; margin: 0 auto 15px;"></div>
-        <p>Loading OpenCV.js...</p>
-        <p style="font-size: 0.9em; color: #666;">This may take a moment</p>
-    </div>
-</div>
 
-<!-- Update the OpenCV script tag -->
+<header>
+  <h2>Fabric Drape Calculator (Fixed & Precise)</h2>
+</header>
+
+<main>
+
+  <!-- =====================
+       CONTROLS
+       ===================== -->
+  <div class="controls">
+    <button id="startCameraBtn">Start Camera</button>
+    <button id="captureBtn" disabled>Capture Frame</button>
+
+    <!-- IMPORTANT: input reset fix applied -->
+    <input type="file" id="imageInput" accept="image/*" />
+
+    <select id="coinType">
+      <option value="2">₹2 Coin (25 mm)</option>
+      <option value="5">₹5 Coin (23 mm)</option>
+      <option value="10">₹10 Coin (27 mm)</option>
+    </select>
+
+    <input type="number" id="supportDia" placeholder="Support disk dia (cm)" value="18" />
+    <input type="number" id="fabricDia" placeholder="Fabric dia (cm)" value="30" />
+
+    <button id="calcBtn">Calculate Drape</button>
+  </div>
+
+  <!-- =====================
+       CANVAS
+       ===================== -->
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- =====================
+       OUTPUT
+       ===================== -->
+  <div class="info">
+    <p><b>Status:</b> <span id="status">Load image or start camera</span></p>
+    <p><b>Reference diameter (px):</b> <span id="refPx">–</span></p>
+    <p><b>Drape area (cm²):</b> <span id="areaCm">–</span></p>
+    <p><b>Drape coefficient:</b> <span id="dc">–</span></p>
+  </div>
+
+</main>
+
+<footer>
+  IIT Delhi – Textile & Fiber Engineering | Fixed Version
+</footer>
+
+<!-- =====================
+     SCRIPT (FULL LOGIC + OPENCV AUTO MODE)
+     ===================== -->
+<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-    // Show loading indicator
-    document.getElementById('loadingIndicator').style.display = 'block';
-    
-    function onOpenCvReady() {
-        console.log('OpenCV.js is ready');
-        cv = window.cv;
-        document.getElementById('loadingIndicator').style.display = 'none';
-        initializeApp();
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const startCameraBtn = document.getElementById('startCameraBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const imageInput = document.getElementById('imageInput');
+  const calcBtn = document.getElementById('calcBtn');
+
+  const statusEl = document.getElementById('status');
+  const refPxEl = document.getElementById('refPx');
+  const areaCmEl = document.getElementById('areaCm');
+  const dcEl = document.getElementById('dc');
+
+  let videoStream = null;
+  let video = document.createElement('video');
+
+  let img = new Image();
+  let scalePxPerCm = null;
+
+  function fitCanvasToImage(image) {
+    const maxWidth = canvas.parentElement.clientWidth;
+    const ratio = image.width / image.height;
+    canvas.width = Math.min(maxWidth, image.width);
+    canvas.height = canvas.width / ratio;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  }
+
+  function getCanvasCoords(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (evt.clientX - rect.left) * scaleX,
+      y: (evt.clientY - rect.top) * scaleY
+    };
+  }
+
+  /* =====================
+     CAMERA
+     ===================== */
+  startCameraBtn.onclick = async () => {
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = videoStream;
+      await video.play();
+      captureBtn.disabled = false;
+      statusEl.textContent = 'Camera started';
+    } catch (e) {
+      alert('Camera access failed');
     }
-    
-    // Fallback if OpenCV fails to load
-    setTimeout(function() {
-        if (!window.cv) {
-            document.getElementById('loadingIndicator').innerHTML = 
-                '<div style="text-align: center; padding: 20px; color: #e74c3c;">' +
-                '<p>OpenCV.js failed to load. Please refresh the page.</p>' +
-                '<button onclick="location.reload()" class="btn btn-primary">Retry</button>' +
-                '</div>';
-        }
-    }, 10000);
+  };
+
+  captureBtn.onclick = () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    if (videoStream) videoStream.getTracks().forEach(t => t.stop());
+    statusEl.textContent = 'Frame captured – auto detecting coin';
+    autoDetectCoin();
+  };
+
+  /* =====================
+     IMAGE UPLOAD
+     ===================== */
+  imageInput.addEventListener('change', () => {
+    const file = imageInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        fitCanvasToImage(img);
+        scalePxPerCm = null;
+        statusEl.textContent = 'Image loaded – auto detecting coin';
+        autoDetectCoin();
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    imageInput.value = '';
+  });
+
+  /* =====================
+     AUTO COIN DETECTION (HOUGH CIRCLE)
+     ===================== */
+  function autoDetectCoin() {
+    if (!cv || !cv.imread) {
+      statusEl.textContent = 'OpenCV loading... click calculate again';
+      return;
+    }
+
+    let src = cv.imread(canvas);
+    let gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, gray, new cv.Size(9, 9), 1.5);
+
+    let circles = new cv.Mat();
+    cv.HoughCircles(
+      gray,
+      circles,
+      cv.HOUGH_GRADIENT,
+      1,
+      gray.rows / 8,
+      100,
+      30,
+      10,
+      gray.rows / 2
+    );
+
+    if (circles.cols > 0) {
+      let x = circles.data32F[0];
+      let y = circles.data32F[1];
+      let r = circles.data32F[2];
+
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const coinMM = document.getElementById('coinType').value == 2 ? 25 :
+                     document.getElementById('coinType').value == 5 ? 23 : 27;
+
+      scalePxPerCm = (2 * r) / (coinMM / 10);
+      refPxEl.textContent = (2 * r).toFixed(2);
+      statusEl.textContent = 'Coin detected automatically';
+    } else {
+      statusEl.textContent = 'Coin not detected – please improve contrast';
+    }
+
+    src.delete(); gray.delete(); circles.delete();
+  }
+
+  /* =====================
+     DRAPE AREA (CONTOUR BASED – PRECISE)
+     ===================== */
+  calcBtn.onclick = () => {
+    if (!scalePxPerCm) {
+      alert('Reference scale not available');
+      return;
+    }
+
+    const supportDia = parseFloat(document.getElementById('supportDia').value);
+    const fabricDia = parseFloat(document.getElementById('fabricDia').value);
+
+    const supportArea = Math.PI * Math.pow(supportDia / 2, 2);
+    const fabricArea = Math.PI * Math.pow(fabricDia / 2, 2);
+
+    let src = cv.imread(canvas);
+    let gray = new cv.Mat();
+    let thresh = new cv.Mat();
+
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.adaptiveThreshold(gray, thresh, 255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY_INV,
+      11,
+      2
+    );
+
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let maxArea = 0;
+    for (let i = 0; i < contours.size(); i++) {
+      let cnt = contours.get(i);
+      let area = cv.contourArea(cnt);
+      if (area > maxArea) maxArea = area;
+    }
+
+    const drapeAreaCm = maxArea / (scalePxPerCm * scalePxPerCm);
+    const dc = (drapeAreaCm - supportArea) / (fabricArea - supportArea);
+
+    areaCmEl.textContent = drapeAreaCm.toFixed(2);
+    dcEl.textContent = dc.toFixed(3);
+    statusEl.textContent = 'Drape calculated (contour-based)';
+
+    src.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+  };
 </script>
 
-        <!-- Setup Instructions -->
-        <div class="card instructions">
-            <h2><i class="fas fa-info-circle"></i> Setup Instructions</h2>
-            <ol>
-                <li>Position phone directly above drape tester (use level guide)</li>
-                <li>Place a coin (for scale) next to drape</li>
-                <li>Ensure good lighting and contrast</li>
-                <li>Use "Start Camera" or "Upload Image"</li>
-                <li>Click on reference object (coin) after capture</li>
-            </ol>
-        </div>
-
-        <!-- Camera Section -->
-        <div class="card">
-            <div class="camera-container">
-                <video id="cameraVideo" autoplay playsinline></video>
-                <canvas id="cameraCanvas" style="display:none;"></canvas>
-                <canvas id="outputCanvas" style="display:none;"></canvas>
-                
-                <!-- Level Indicator -->
-                <div class="level-indicator">
-                    <div class="level-bubble">
-                        <div class="bubble-center"></div>
-                    </div>
-                    <div class="level-text">Level: <span id="levelStatus">--</span>°</div>
-                </div>
-                
-                <!-- Overlay -->
-                <div class="overlay">
-                    <div class="target-circle"></div>
-                    <div class="crosshair"></div>
-                </div>
-            </div>
-            
-            <div class="controls">
-                <button id="startCamera" class="btn btn-primary">
-                    <i class="fas fa-camera"></i> Start Camera
-                </button>
-                <button id="uploadImage" class="btn btn-info">
-                    <i class="fas fa-upload"></i> Upload Image
-                </button>
-                <button id="capture" class="btn btn-success" disabled>
-                    <i class="fas fa-camera-retro"></i> Capture & Analyze
-                </button>
-                <button id="reset" class="btn btn-secondary" disabled>
-                    <i class="fas fa-redo"></i> Reset
-                </button>
-            </div>
-            
-            <!-- Hidden file input -->
-            <input type="file" id="fileInput" accept="image/*" style="display: none;">
-        </div>
-
-        <!-- Reference Input -->
-        <div class="card">
-            <h3><i class="fas fa-balance-scale"></i> Reference Scale</h3>
-            <div class="form-group">
-                <label for="refType">Reference Object:</label>
-                <select id="refType" class="form-control">
-                    <option value="coin2">Indian 2 Rupee Coin (2.5 cm)</option>
-                    <option value="coin10">Indian 10 Rupee Coin (2.7 cm)</option>
-                    <option value="custom">Custom Size</option>
-                </select>
-            </div>
-            
-            <div id="customRef" style="display:none;">
-                <div class="form-group">
-                    <label for="refDiameter">Diameter (cm):</label>
-                    <input type="number" id="refDiameter" class="form-control" step="0.1" min="0.1" value="2.5">
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label>Image Analysis:</label>
-                <div class="checkbox-group">
-                    <label>
-                        <input type="checkbox" id="autoHighlight" checked>
-                        Auto-highlight drape area
-                    </label>
-                    <label>
-                        <input type="checkbox" id="autoDetectReference">
-                        Auto-detect reference object
-                    </label>
-                </div>
-            </div>
-        </div>
-
-        <!-- Results Section -->
-        <div class="card">
-            <h2><i class="fas fa-chart-bar"></i> Results</h2>
-            <div id="results" class="results-container">
-                <div class="result-item">
-                    <span class="label">Pixel Area:</span>
-                    <span id="pixelArea" class="value">--</span>
-                </div>
-                <div class="result-item">
-                    <span class="label">Actual Area (cm²):</span>
-                    <span id="actualArea" class="value">--</span>
-                </div>
-                <div class="result-item">
-                    <span class="label">Drape Coefficient:</span>
-                    <span id="drapeCoefficient" class="value">--</span>
-                </div>
-                <div class="result-item">
-                    <span class="label">Status:</span>
-                    <span id="status" class="value">Ready</span>
-                </div>
-            </div>
-            
-            <!-- Visual Output -->
-            <div class="image-comparison">
-                <div class="image-box">
-                    <h4>Original</h4>
-                    <canvas id="originalCanvas" class="display-canvas"></canvas>
-                </div>
-                <div class="image-box">
-                    <h4>Processed</h4>
-                    <canvas id="processedCanvas" class="display-canvas"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- Drape Tester Settings -->
-        <div class="card">
-            <h3><i class="fas fa-cogs"></i> Drape Tester Settings</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="diskDiameter">Support Disk Diameter (cm):</label>
-                    <input type="number" id="diskDiameter" class="form-control" value="18.0" step="0.1" min="1">
-                </div>
-                <div class="form-group">
-                    <label for="fabricDiameter">Fabric Diameter (cm):</label>
-                    <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1" min="1">
-                </div>
-            </div>
-            <button id="calculateDrape" class="btn btn-info" disabled>
-                <i class="fas fa-calculator"></i> Calculate Drape %
-            </button>
-            <button id="autoCalculate" class="btn btn-outline" disabled>
-                <i class="fas fa-robot"></i> Auto Calculate
-            </button>
-        </div>
-
-        <!-- History -->
-        <div class="card">
-            <h3><i class="fas fa-history"></i> Measurement History</h3>
-            <table id="historyTable">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Area (cm²)</th>
-                        <th>Drape %</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="historyBody">
-                    <!-- Will be populated by JS -->
-                </tbody>
-            </table>
-            <button id="exportData" class="btn btn-outline">
-                <i class="fas fa-download"></i> Export CSV
-            </button>
-            <button id="clearHistory" class="btn btn-small" style="margin-left: 10px;">
-                <i class="fas fa-trash"></i> Clear History
-            </button>
-        </div>
-    </div>
-
-    <!-- Load scripts -->
-    <script src="utils.js"></script>
-    <script src="script.js"></script>
 </body>
 </html>
