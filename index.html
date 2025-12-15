@@ -17,6 +17,38 @@
             <p class="subtitle">Department of Textile & Fiber Engineering, IIT Delhi, Hauz Khas, New Delhi, 110016</p>
             <p class="subtitle">Measure fabric drape area using camera or upload images</p>
         </header>
+        <!-- Add this after the header in index.html -->
+<div id="loadingIndicator" class="card" style="display: none;">
+    <div style="text-align: center; padding: 20px;">
+        <div class="loader" style="width: 40px; height: 40px; margin: 0 auto 15px;"></div>
+        <p>Loading OpenCV.js...</p>
+        <p style="font-size: 0.9em; color: #666;">This may take a moment</p>
+    </div>
+</div>
+
+<!-- Update the OpenCV script tag -->
+<script>
+    // Show loading indicator
+    document.getElementById('loadingIndicator').style.display = 'block';
+    
+    function onOpenCvReady() {
+        console.log('OpenCV.js is ready');
+        cv = window.cv;
+        document.getElementById('loadingIndicator').style.display = 'none';
+        initializeApp();
+    }
+    
+    // Fallback if OpenCV fails to load
+    setTimeout(function() {
+        if (!window.cv) {
+            document.getElementById('loadingIndicator').innerHTML = 
+                '<div style="text-align: center; padding: 20px; color: #e74c3c;">' +
+                '<p>OpenCV.js failed to load. Please refresh the page.</p>' +
+                '<button onclick="location.reload()" class="btn btn-primary">Retry</button>' +
+                '</div>';
+        }
+    }, 10000);
+</script>
 
         <!-- Setup Instructions -->
         <div class="card instructions">
