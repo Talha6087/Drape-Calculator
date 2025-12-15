@@ -1,3 +1,8 @@
+You're right! The click precision issue is likely due to incorrect coordinate mapping between the display canvas and the actual canvas. Let me fix this by providing the complete corrected code.
+
+File 1: script.js (COMPLETELY UPDATED - Fixed Click Precision)
+
+```javascript
 // Drape Area Calculator - Complete Script with all features
 
 // Global variables
@@ -15,6 +20,8 @@ let levelInterval = null;
 let currentAngle = 0;
 let isProcessing = false;
 let clickDebounce = null;
+let canvasScaleX = 1;
+let canvasScaleY = 1;
 
 // OpenCV ready handler
 function onOpenCvReady() {
@@ -82,6 +89,9 @@ function initializeEventListeners() {
     // Disk diameter validation
     document.getElementById('diskDiameter').addEventListener('change', validateDiameters);
     document.getElementById('fabricDiameter').addEventListener('change', validateDiameters);
+    
+    // Window resize handler
+    window.addEventListener('resize', updateCanvasScaleFactors);
 }
 
 // Setup accelerometer for level detection
@@ -138,21 +148,14 @@ function startDesktopLevelSimulation() {
 
 // Handle device orientation (more accurate for mobile)
 function handleDeviceOrientation(event) {
-    // beta: front-to-back tilt (-180 to 180)
-    // gamma: left-to-right tilt (-90 to 90)
-    // alpha: compass direction (0-360)
+    const beta = event.beta || 0;
+    const gamma = event.gamma || 0;
     
-    const beta = event.beta || 0;  // Front-to-back tilt
-    const gamma = event.gamma || 0; // Left-to-right tilt
-    
-    // Calculate overall tilt angle
     const angle = Math.sqrt(beta * beta + gamma * gamma);
     currentAngle = angle;
     
-    // Update level indicator with both angle and tilt values
     UIUtils.updateLevelIndicator(angle, beta, gamma);
     
-    // Show warning if angle is too large
     if (streaming && angle > 10) {
         document.getElementById('status').textContent = `Warning: Camera tilted ${angle.toFixed(1)}°. Level your device.`;
     }
@@ -163,13 +166,10 @@ function handleDeviceMotion(event) {
     if (!event.accelerationIncludingGravity) return;
     
     const accel = event.accelerationIncludingGravity;
-    
-    // Calculate approximate tilt angles from acceleration
     const x = accel.x || 0;
     const y = accel.y || 0;
     const z = accel.z || 9.81;
     
-    // Convert to approximate beta and gamma
     const beta = Math.atan2(x, Math.sqrt(y*y + z*z)) * (180 / Math.PI);
     const gamma = Math.atan2(y, Math.sqrt(x*x + z*z)) * (180 / Math.PI);
     
@@ -194,6 +194,42 @@ function validateDiameters() {
     }
 }
 
+// Update canvas scale factors for precise click mapping
+function updateCanvasScaleFactors() {
+    if (!currentCanvas) return;
+    
+    const rect = currentCanvas.getBoundingClientRect();
+    canvasDisplayWidth = rect.width;
+    canvasDisplayHeight = rect.height;
+    
+    // Calculate the actual rendered dimensions (considering object-fit: contain)
+    const canvasAspect = canvasActualWidth / canvasActualHeight;
+    const displayAspect = canvasDisplayWidth / canvasDisplayHeight;
+    
+    let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+    
+    if (displayAspect > canvasAspect) {
+        // Canvas is taller than display area
+        renderedHeight = canvasDisplayHeight;
+        renderedWidth = canvasDisplayHeight * canvasAspect;
+        offsetX = (canvasDisplayWidth - renderedWidth) / 2;
+    } else {
+        // Canvas is wider than display area
+        renderedWidth = canvasDisplayWidth;
+        renderedHeight = canvasDisplayWidth / canvasAspect;
+        offsetY = (canvasDisplayHeight - renderedHeight) / 2;
+    }
+    
+    canvasScaleX = canvasActualWidth / renderedWidth;
+    canvasScaleY = canvasActualHeight / renderedHeight;
+    
+    // Store offset for click calculations
+    currentCanvas.dataset.offsetX = offsetX;
+    currentCanvas.dataset.offsetY = offsetY;
+    currentCanvas.dataset.renderedWidth = renderedWidth;
+    currentCanvas.dataset.renderedHeight = renderedHeight;
+}
+
 // Start camera function
 async function startCamera() {
     if (streaming) return;
@@ -201,7 +237,6 @@ async function startCamera() {
     const video = document.getElementById('video');
     const statusElement = document.getElementById('status');
     
-    // Check camera permissions and capabilities
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         UIUtils.showToast('Camera access not supported in this browser', 'error');
         return;
@@ -210,7 +245,6 @@ async function startCamera() {
     UIUtils.showLoading(true, 'Accessing camera...');
     
     try {
-        // Request camera access
         const mediaStream = await navigator.mediaDevices.getUserMedia({ 
             video: { 
                 facingMode: 'environment',
@@ -223,10 +257,8 @@ async function startCamera() {
         stream = mediaStream;
         video.srcObject = stream;
         
-        // Wait for video to start playing
         await video.play();
         
-        // Update UI
         document.getElementById('startCamera').disabled = true;
         document.getElementById('capture').disabled = false;
         document.getElementById('reset').disabled = false;
@@ -283,35 +315,43 @@ function handleImageUpload(event) {
             // Hide video
             video.style.display = 'none';
             
-            // Calculate display dimensions
-            const maxDisplayWidth = originalCanvas.parentElement.clientWidth;
-            const maxDisplayHeight = 400;
+            // Store actual dimensions
+            canvasActualWidth = img.width;
+            canvasActualHeight = img.height;
             
-            let displayWidth = img.width;
-            let displayHeight = img.height;
+            // Set canvas to actual image dimensions for processing
+            canvas.width = canvasActualWidth;
+            canvas.height = canvasActualHeight;
+            
+            // For display, set to container size
+            const container = originalCanvas.parentElement;
+            const maxWidth = container.clientWidth - 30; // Account for padding
+            const maxHeight = 400;
+            
+            let displayWidth = canvasActualWidth;
+            let displayHeight = canvasActualHeight;
             
             // Maintain aspect ratio
-            if (displayWidth > maxDisplayWidth || displayHeight > maxDisplayHeight) {
-                const ratio = Math.min(maxDisplayWidth / displayWidth, maxDisplayHeight / displayHeight);
+            if (displayWidth > maxWidth || displayHeight > maxHeight) {
+                const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
                 displayWidth = Math.floor(displayWidth * ratio);
                 displayHeight = Math.floor(displayHeight * ratio);
             }
             
-            // Set canvas sizes
-            canvas.width = img.width;
-            canvas.height = img.height;
             originalCanvas.width = displayWidth;
             originalCanvas.height = displayHeight;
             
             // Draw to processing canvas (full size)
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             
             // Store image data
             capturedImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
             
-            // Draw to display canvas (scaled)
+            // Draw to display canvas (scaled with high quality)
             const displayCtx = originalCanvas.getContext('2d');
+            displayCtx.imageSmoothingEnabled = true;
+            displayCtx.imageSmoothingQuality = 'high';
             displayCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
             
             // Make visible
@@ -328,19 +368,22 @@ function handleImageUpload(event) {
             currentCanvas = originalCanvas;
             canvasDisplayWidth = originalCanvas.offsetWidth;
             canvasDisplayHeight = originalCanvas.offsetHeight;
-            canvasActualWidth = originalCanvas.width;
-            canvasActualHeight = originalCanvas.height;
             
+            // Calculate scale factors
+            updateCanvasScaleFactors();
+            
+            // Enable clicking
             originalCanvas.style.cursor = 'crosshair';
             originalCanvas.addEventListener('click', handleCanvasClick);
             
             referencePoint = null;
             
-            UIUtils.showToast('Image loaded. Click on the coin.', 'success');
+            UIUtils.showToast('Image loaded. Click precisely on the coin.', 'success');
         };
         
         img.onerror = function() {
             UIUtils.showToast('Error loading image', 'error');
+            UIUtils.showLoading(false);
         };
         
         img.src = e.target.result;
@@ -348,6 +391,7 @@ function handleImageUpload(event) {
     
     reader.onerror = function() {
         UIUtils.showToast('Error reading file', 'error');
+        UIUtils.showLoading(false);
     };
     
     reader.readAsDataURL(file);
@@ -364,26 +408,13 @@ function captureImage() {
     const canvas = document.getElementById('canvas');
     const originalCanvas = document.getElementById('originalCanvas');
     
-    // Set canvas to video dimensions
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Get video dimensions
+    canvasActualWidth = video.videoWidth;
+    canvasActualHeight = video.videoHeight;
     
-    // Calculate display dimensions
-    const maxDisplayWidth = originalCanvas.parentElement.clientWidth;
-    const maxDisplayHeight = 400;
-    
-    let displayWidth = video.videoWidth;
-    let displayHeight = video.videoHeight;
-    
-    // Maintain aspect ratio
-    if (displayWidth > maxDisplayWidth || displayHeight > maxDisplayHeight) {
-        const ratio = Math.min(maxDisplayWidth / displayWidth, maxDisplayHeight / displayHeight);
-        displayWidth = Math.floor(displayWidth * ratio);
-        displayHeight = Math.floor(displayHeight * ratio);
-    }
-    
-    originalCanvas.width = displayWidth;
-    originalCanvas.height = displayHeight;
+    // Set canvas to actual video dimensions for processing
+    canvas.width = canvasActualWidth;
+    canvas.height = canvasActualHeight;
     
     // Draw current video frame to canvas
     const context = canvas.getContext('2d');
@@ -392,8 +423,28 @@ function captureImage() {
     // Store the image data
     capturedImage = context.getImageData(0, 0, canvas.width, canvas.height);
     
+    // Calculate display dimensions
+    const container = originalCanvas.parentElement;
+    const maxWidth = container.clientWidth - 30;
+    const maxHeight = 400;
+    
+    let displayWidth = canvasActualWidth;
+    let displayHeight = canvasActualHeight;
+    
+    // Maintain aspect ratio
+    if (displayWidth > maxWidth || displayHeight > maxHeight) {
+        const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
+        displayWidth = Math.floor(displayWidth * ratio);
+        displayHeight = Math.floor(displayHeight * ratio);
+    }
+    
+    originalCanvas.width = displayWidth;
+    originalCanvas.height = displayHeight;
+    
     // Display the captured image on original canvas
     const originalCtx = originalCanvas.getContext('2d');
+    originalCtx.imageSmoothingEnabled = true;
+    originalCtx.imageSmoothingQuality = 'high';
     originalCtx.drawImage(video, 0, 0, displayWidth, displayHeight);
     
     // Show canvas, hide video
@@ -401,17 +452,18 @@ function captureImage() {
     originalCanvas.style.display = 'block';
     
     // Update UI
-    document.getElementById('status').textContent = 'Click on reference object (coin) in image';
+    document.getElementById('status').textContent = 'Click precisely on reference object (coin)';
     document.getElementById('capture').disabled = true;
     document.getElementById('startCamera').disabled = true;
     document.getElementById('uploadImage').disabled = false;
     
-    // Store canvas dimensions for click coordinate mapping
+    // Setup for clicking
     currentCanvas = originalCanvas;
     canvasDisplayWidth = originalCanvas.offsetWidth;
     canvasDisplayHeight = originalCanvas.offsetHeight;
-    canvasActualWidth = originalCanvas.width;
-    canvasActualHeight = originalCanvas.height;
+    
+    // Calculate scale factors
+    updateCanvasScaleFactors();
     
     // Enable canvas clicking for reference selection
     originalCanvas.style.cursor = 'crosshair';
@@ -419,62 +471,126 @@ function captureImage() {
     
     referencePoint = null;
     
-    UIUtils.showToast('Image captured. Click on reference object.', 'info');
+    UIUtils.showToast('Image captured. Click precisely on the coin.', 'info');
 }
 
-// Handle canvas click for reference point selection
+// FIXED: Handle canvas click with precise coordinate mapping
 function handleCanvasClick(event) {
-    if (clickDebounce) return;
-    if (!capturedImage) return;
+    if (clickDebounce || !capturedImage) return;
     
     clickDebounce = setTimeout(() => {
         const canvas = event.target;
         const rect = canvas.getBoundingClientRect();
         
-        // Calculate actual canvas coordinates
-        const scaleX = canvasActualWidth / canvasDisplayWidth;
-        const scaleY = canvasActualHeight / canvasDisplayHeight;
+        // Get the rendered area dimensions and offset
+        const offsetX = parseFloat(canvas.dataset.offsetX) || 0;
+        const offsetY = parseFloat(canvas.dataset.offsetY) || 0;
+        const renderedWidth = parseFloat(canvas.dataset.renderedWidth) || canvasDisplayWidth;
+        const renderedHeight = parseFloat(canvas.dataset.renderedHeight) || canvasDisplayHeight;
         
-        const x = (event.clientX - rect.left) * scaleX;
-        const y = (event.clientY - rect.top) * scaleY;
+        // Calculate click position within the rendered image area
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
         
-        // Store reference point
+        // Check if click is within the rendered image (not in the padding area)
+        if (clickX < offsetX || clickX > offsetX + renderedWidth ||
+            clickY < offsetY || clickY > offsetY + renderedHeight) {
+            UIUtils.showToast('Please click on the image area, not the padding', 'warning');
+            clickDebounce = null;
+            return;
+        }
+        
+        // Calculate position within the rendered image (0 to renderedWidth/Height)
+        const renderedX = clickX - offsetX;
+        const renderedY = clickY - offsetY;
+        
+        // Calculate actual canvas coordinates using scale factors
+        const actualX = Math.round(renderedX * canvasScaleX);
+        const actualY = Math.round(renderedY * canvasScaleY);
+        
+        // Clamp to canvas bounds
+        const clampedX = Math.max(0, Math.min(actualX, canvasActualWidth - 1));
+        const clampedY = Math.max(0, Math.min(actualY, canvasActualHeight - 1));
+        
+        // Store reference point with both display and actual coordinates
         referencePoint = { 
-            x: Math.round(x), 
-            y: Math.round(y),
-            displayX: event.clientX - rect.left,
-            displayY: event.clientY - rect.top
+            x: clampedX, 
+            y: clampedY,
+            displayX: clickX,
+            displayY: clickY,
+            renderedX: renderedX,
+            renderedY: renderedY
         };
         
-        // Draw a marker at the clicked point
+        console.log('Click coordinates:', {
+            click: {x: clickX, y: clickY},
+            rendered: {x: renderedX, y: renderedY},
+            actual: {x: clampedX, y: clampedY},
+            scale: {x: canvasScaleX, y: canvasScaleY},
+            offset: {x: offsetX, y: offsetY}
+        });
+        
+        // Draw a marker at the clicked point on display canvas
         const ctx = canvas.getContext('2d');
+        
+        // Clear previous markers
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Redraw the image
+        if (capturedImage) {
+            ctx.putImageData(capturedImage, 0, 0);
+        }
+        
+        // Draw precision marker (crosshair with circle)
+        ctx.save();
+        
+        // Outer circle
         ctx.beginPath();
-        ctx.arc(referencePoint.displayX, referencePoint.displayY, 8, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-        ctx.fill();
-        ctx.strokeStyle = 'white';
+        ctx.arc(referencePoint.displayX, referencePoint.displayY, 15, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Add crosshair
+        // Inner circle
         ctx.beginPath();
-        ctx.moveTo(referencePoint.displayX - 15, referencePoint.displayY);
-        ctx.lineTo(referencePoint.displayX + 15, referencePoint.displayY);
-        ctx.moveTo(referencePoint.displayX, referencePoint.displayY - 15);
-        ctx.lineTo(referencePoint.displayX, referencePoint.displayY + 15);
+        ctx.arc(referencePoint.displayX, referencePoint.displayY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+        ctx.fill();
         ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1;
         ctx.stroke();
+        
+        // Crosshair lines
+        ctx.beginPath();
+        // Horizontal line
+        ctx.moveTo(referencePoint.displayX - 25, referencePoint.displayY);
+        ctx.lineTo(referencePoint.displayX + 25, referencePoint.displayY);
+        // Vertical line
+        ctx.moveTo(referencePoint.displayX, referencePoint.displayY - 25);
+        ctx.lineTo(referencePoint.displayX, referencePoint.displayY + 25);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        // Add text label
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Reference Point', referencePoint.displayX, referencePoint.displayY - 30);
+        
+        ctx.restore();
         
         // Remove click listener
         canvas.style.cursor = 'default';
         canvas.removeEventListener('click', handleCanvasClick);
         
         // Process the image with the reference point
-        processImageWithReference();
+        setTimeout(() => {
+            processImageWithReference();
+        }, 500);
         
         clickDebounce = null;
-    }, 100);
+    }, 50);
 }
 
 // Auto-detect reference object
@@ -489,7 +605,6 @@ function autoDetectReference() {
                 throw new Error('OpenCV not loaded');
             }
             
-            // Convert to OpenCV mat
             const src = cv.matFromImageData(capturedImage);
             const gray = new cv.Mat();
             const blurred = new cv.Mat();
@@ -548,33 +663,47 @@ function autoDetectReference() {
                 const referenceX = rect.x + rect.width / 2;
                 const referenceY = rect.y + rect.height / 2;
                 
-                // Scale to display coordinates
-                const scaleX = canvasDisplayWidth / canvasActualWidth;
-                const scaleY = canvasDisplayHeight / canvasActualHeight;
+                // Convert to display coordinates
+                const displayX = (referenceX / canvasScaleX) + (parseFloat(currentCanvas.dataset.offsetX) || 0);
+                const displayY = (referenceY / canvasScaleY) + (parseFloat(currentCanvas.dataset.offsetY) || 0);
                 
                 referencePoint = {
                     x: referenceX,
                     y: referenceY,
-                    displayX: referenceX * scaleX,
-                    displayY: referenceY * scaleY
+                    displayX: displayX,
+                    displayY: displayY,
+                    renderedX: referenceX / canvasScaleX,
+                    renderedY: referenceY / canvasScaleY
                 };
                 
                 // Draw marker on canvas
                 const canvas = document.getElementById('originalCanvas');
                 const ctx = canvas.getContext('2d');
                 
+                // Draw precision marker
                 ctx.beginPath();
-                ctx.arc(referencePoint.displayX, referencePoint.displayY, 10, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.arc(referencePoint.displayX, referencePoint.displayY, 12, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
                 ctx.fill();
                 ctx.strokeStyle = 'white';
                 ctx.lineWidth = 2;
                 ctx.stroke();
                 
+                // Add crosshair
+                ctx.beginPath();
+                ctx.moveTo(referencePoint.displayX - 20, referencePoint.displayY);
+                ctx.lineTo(referencePoint.displayX + 20, referencePoint.displayY);
+                ctx.moveTo(referencePoint.displayX, referencePoint.displayY - 20);
+                ctx.lineTo(referencePoint.displayX, referencePoint.displayY + 20);
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                
                 // Add text
                 ctx.fillStyle = 'white';
-                ctx.font = 'bold 14px Arial';
-                ctx.fillText('Auto-detected', referencePoint.displayX - 40, referencePoint.displayY - 15);
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Auto-detected', referencePoint.displayX, referencePoint.displayY - 25);
                 
                 canvas.style.cursor = 'default';
                 canvas.removeEventListener('click', handleCanvasClick);
@@ -639,7 +768,7 @@ async function processImageWithReference() {
         const hierarchy = new cv.Mat();
         cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
-        // Find largest contour
+        // Find largest contour (drape area)
         let largestContour = null;
         let maxArea = 0;
         
@@ -661,10 +790,11 @@ async function processImageWithReference() {
         const pixelArea = maxArea;
         document.getElementById('pixelArea').textContent = pixelArea.toFixed(0);
         
-        // Find reference object
+        // Find reference object (search in a larger area around click point)
         let referenceContour = null;
         let referenceRect = null;
         let minDistance = Infinity;
+        const searchRadius = 300; // Increased search radius
         
         for (let i = 0; i < contours.size(); i++) {
             const contour = contours.get(i);
@@ -678,10 +808,22 @@ async function processImageWithReference() {
                 Math.pow(contourCenterY - referencePoint.y, 2)
             );
             
-            const aspectRatio = Math.min(rect.width, rect.height) / Math.max(rect.width, rect.height);
+            // Calculate circularity
             const area = cv.contourArea(contour);
+            const perimeter = cv.arcLength(contour, true);
+            const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
             
-            if (distance < 200 && aspectRatio > 0.7 && area > 100 && area < 10000 && distance < minDistance) {
+            // Aspect ratio
+            const aspectRatio = Math.min(rect.width, rect.height) / Math.max(rect.width, rect.height);
+            
+            // Look for coin-sized, circular objects
+            if (distance < searchRadius && 
+                aspectRatio > 0.6 && 
+                circularity > 0.4 && 
+                area > 50 && 
+                area < 20000 && 
+                distance < minDistance) {
+                
                 minDistance = distance;
                 referenceContour = contour;
                 referenceRect = rect;
@@ -689,7 +831,7 @@ async function processImageWithReference() {
         }
         
         if (!referenceContour || !referenceRect) {
-            throw new Error('Reference object not found near clicked point');
+            throw new Error(`Reference object not found within ${searchRadius}px of click point`);
         }
         
         // Calculate reference diameter in pixels
@@ -750,7 +892,7 @@ function displayProcessedImage(src, contours, drapeContour, refContour) {
     const processedCanvas = document.getElementById('processedCanvas');
     const processedCtx = processedCanvas.getContext('2d');
     
-    // Set canvas size to match original
+    // Set canvas size to match original display canvas
     const originalCanvas = document.getElementById('originalCanvas');
     processedCanvas.width = originalCanvas.width;
     processedCanvas.height = originalCanvas.height;
@@ -1010,6 +1152,8 @@ function resetApp() {
     referencePoint = null;
     streaming = false;
     isProcessing = false;
+    canvasScaleX = 1;
+    canvasScaleY = 1;
     
     // Remove event listeners from canvas
     originalCanvas.style.cursor = 'default';
@@ -1026,12 +1170,10 @@ function resetApp() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Drape Area Calculator initialized');
     
-    // Check if on mobile
     if (DeviceUtils.isMobile()) {
         console.log('Running on mobile device');
     }
     
-    // Add some helpful tips
     setTimeout(() => {
         if (!capturedImage) {
             UIUtils.showToast('Tip: Use a coin as reference for accurate measurements', 'info', 5000);
