@@ -195,34 +195,44 @@
     <!-- Load main script LAST -->
     <script src="script.js"></script>
     
-    <!-- Debug script to check if buttons work -->
+    <!-- Initialize device orientation (leveler) -->
     <script>
-        // Debug: Check if buttons exist and can be clicked
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM fully loaded');
-            
-            // Quick test of buttons
-            const testButtons = ['startCamera', 'uploadImage', 'reset', 'calculateDrape', 'autoCalculate', 'exportData', 'clearHistory'];
-            
-            testButtons.forEach(buttonId => {
-                const btn = document.getElementById(buttonId);
-                if (btn) {
-                    console.log(`Button ${buttonId} found:`, btn);
-                    // Add a test click handler
-                    btn.addEventListener('click', function(e) {
-                        console.log(`Button ${buttonId} clicked`);
-                    });
-                } else {
-                    console.error(`Button ${buttonId} NOT FOUND!`);
-                }
-            });
-            
-            // Test file input
-            const fileInput = document.getElementById('fileInput');
-            if (fileInput) {
-                console.log('File input found');
-            }
+            initializeDeviceOrientation();
         });
+        
+        function initializeDeviceOrientation() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && 
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS 13+ devices need permission
+                document.getElementById('startCamera').addEventListener('click', function() {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                startDeviceOrientation();
+                            }
+                        })
+                        .catch(console.error);
+                });
+            } else {
+                // Android and other devices
+                window.addEventListener('deviceorientation', handleDeviceOrientation);
+            }
+        }
+        
+        function startDeviceOrientation() {
+            window.addEventListener('deviceorientation', handleDeviceOrientation);
+        }
+        
+        function handleDeviceOrientation(event) {
+            const beta = event.beta;  // front-to-back tilt
+            const gamma = event.gamma; // left-to-right tilt
+            
+            if (beta !== null && gamma !== null) {
+                const angle = Math.sqrt(beta * beta + gamma * gamma);
+                UIUtils.updateLevelIndicator(angle, beta, gamma);
+            }
+        }
     </script>
 </body>
 </html>
