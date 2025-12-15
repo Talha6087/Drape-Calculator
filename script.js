@@ -1,5 +1,4 @@
-// Drape Area Calculator - Complete Script
-// Fixed: Reference point precision and Calculate Drape % functionality
+// Drape Area Calculator - Complete Fixed Version
 
 // Global variables
 let stream = null;
@@ -12,18 +11,29 @@ let canvasDisplayHeight = 0;
 let canvasActualWidth = 0;
 let canvasActualHeight = 0;
 let measurementHistory = [];
+let openCvReady = false;
 
 // OpenCV ready handler
 function onOpenCvReady() {
     console.log('OpenCV.js is ready');
+    openCvReady = true;
     initializeEventListeners();
     loadHistory();
+    setupDeviceOrientation();
 }
 
 // Initialize all event listeners
 function initializeEventListeners() {
     // Start Camera button
     document.getElementById('startCamera').addEventListener('click', startCamera);
+    
+    // Upload Image button
+    document.getElementById('uploadImage').addEventListener('click', () => {
+        document.getElementById('fileInput').click();
+    });
+    
+    // File input change
+    document.getElementById('fileInput').addEventListener('change', handleImageUpload);
     
     // Capture button
     document.getElementById('capture').addEventListener('click', captureImage);
@@ -33,12 +43,8 @@ function initializeEventListeners() {
     
     // Reference type change
     document.getElementById('refType').addEventListener('change', function() {
-        const customRef = document.getElementById('customRef');
-        if (this.value === 'custom') {
-            customRef.style.display = 'block';
-        } else {
-            customRef.style.display = 'none';
-        }
+        const customRef = document.getElementById('customRefGroup');
+        customRef.style.display = this.value === 'custom' ? 'block' : 'none';
     });
     
     // Calculate Drape % button
@@ -46,42 +52,122 @@ function initializeEventListeners() {
     
     // Export CSV button
     document.getElementById('exportData').addEventListener('click', exportToCSV);
+    
+    // Clear History button
+    document.getElementById('clearHistory').addEventListener('click', clearHistory);
 }
 
 // Start camera function
 function startCamera() {
     const video = document.getElementById('video');
+    const status = document.getElementById('status');
+    
+    status.textContent = 'Starting camera...';
+    
+    // Stop existing stream if any
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+    }
     
     // Request camera access
     navigator.mediaDevices.getUserMedia({ 
         video: { 
-            facingMode: 'environment', // Use back camera on mobile
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
         },
         audio: false 
     })
     .then(function(mediaStream) {
         stream = mediaStream;
         video.srcObject = stream;
-        video.play();
         
-        // Update UI
-        document.getElementById('startCamera').disabled = true;
-        document.getElementById('capture').disabled = false;
-        document.getElementById('reset').disabled = false;
-        document.getElementById('status').textContent = 'Camera ready - Position phone above drape';
-        
-        // Set streaming flag when video starts playing
-        video.onplaying = function() {
+        video.onloadedmetadata = function() {
+            video.play();
+            
+            // Update UI
+            document.getElementById('startCamera').disabled = true;
+            document.getElementById('capture').disabled = false;
+            document.getElementById('reset').disabled = false;
+            document.getElementById('uploadImage').disabled = true;
+            status.textContent = 'Camera ready - Position phone above drape';
+            
             streaming = true;
+        };
+        
+        video.onerror = function(err) {
+            console.error('Video error:', err);
+            status.textContent = 'Error starting video stream';
         };
     })
     .catch(function(err) {
         console.error('Error accessing camera:', err);
-        document.getElementById('status').textContent = 'Error accessing camera: ' + err.message;
+        status.textContent = 'Error accessing camera: ' + err.message;
         alert('Unable to access camera. Please ensure camera permissions are granted.');
     });
+}
+
+// Handle image upload
+function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const status = document.getElementById('status');
+    status.textContent = 'Loading image...';
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+            // Create canvas
+            const canvas = document.getElementById('canvas');
+            const outputCanvas = document.getElementById('outputCanvas');
+            
+            // Set canvas dimensions
+            canvas.width = img.width;
+            canvas.height = img.height;
+            outputCanvas.width = img.width;
+            outputCanvas.height = img.height;
+            
+            // Draw image to canvas
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Store the image data
+            capturedImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // Display on output canvas
+            const outputCtx = outputCanvas.getContext('2d');
+            outputCtx.drawImage(img, 0, 0);
+            
+            // Show canvas, hide video
+            const video = document.getElementById('video');
+            video.style.display = 'none';
+            outputCanvas.style.display = 'block';
+            
+            // Update UI
+            status.textContent = 'Click on reference object (coin) in image';
+            document.getElementById('capture').disabled = true;
+            document.getElementById('startCamera').disabled = true;
+            document.getElementById('uploadImage').disabled = true;
+            document.getElementById('reset').disabled = false;
+            
+            // Store canvas dimensions for click coordinate mapping
+            currentCanvas = outputCanvas;
+            canvasDisplayWidth = outputCanvas.offsetWidth;
+            canvasDisplayHeight = outputCanvas.offsetHeight;
+            canvasActualWidth = outputCanvas.width;
+            canvasActualHeight = outputCanvas.height;
+            
+            // Enable canvas clicking for reference selection
+            outputCanvas.style.cursor = 'crosshair';
+            outputCanvas.addEventListener('click', handleCanvasClick);
+        };
+        
+        img.src = e.target.result;
+    };
+    
+    reader.readAsDataURL(file);
 }
 
 // Capture image function
@@ -91,6 +177,9 @@ function captureImage() {
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const outputCanvas = document.getElementById('outputCanvas');
+    const status = document.getElementById('status');
+    
+    status.textContent = 'Capturing image...';
     
     // Set canvas to video dimensions
     canvas.width = video.videoWidth;
@@ -114,9 +203,10 @@ function captureImage() {
     outputCanvas.style.display = 'block';
     
     // Update UI
-    document.getElementById('status').textContent = 'Click on reference object (coin) in image';
+    status.textContent = 'Click on reference object (coin) in image';
     document.getElementById('capture').disabled = true;
     document.getElementById('startCamera').disabled = true;
+    document.getElementById('uploadImage').disabled = true;
     
     // Store canvas dimensions for click coordinate mapping
     currentCanvas = outputCanvas;
@@ -130,14 +220,14 @@ function captureImage() {
     outputCanvas.addEventListener('click', handleCanvasClick);
 }
 
-// Handle canvas click for reference point selection (FIXED for precision)
+// Handle canvas click for reference point selection
 function handleCanvasClick(event) {
     if (!capturedImage) return;
     
     const canvas = event.target;
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate actual canvas coordinates (considering scaling) - FIXED
+    // Calculate actual canvas coordinates (considering scaling)
     const scaleX = canvasActualWidth / canvasDisplayWidth;
     const scaleY = canvasActualHeight / canvasDisplayHeight;
     
@@ -184,11 +274,11 @@ function handleCanvasClick(event) {
 function processImageWithReference() {
     if (!capturedImage || !referencePoint) return;
     
-    document.getElementById('status').textContent = 'Processing image...';
+    const status = document.getElementById('status');
+    status.textContent = 'Processing image...';
     
-    // Use OpenCV for image processing
-    if (typeof cv === 'undefined') {
-        document.getElementById('status').textContent = 'OpenCV not loaded yet';
+    if (!openCvReady) {
+        status.textContent = 'OpenCV not loaded yet. Please wait...';
         return;
     }
     
@@ -215,7 +305,7 @@ function processImageWithReference() {
             const contour = contours.get(i);
             const area = cv.contourArea(contour);
             
-            if (area > maxArea && area > 1000) { // Ignore small contours
+            if (area > maxArea && area > 1000) {
                 maxArea = area;
                 largestContour = contour;
             }
@@ -246,8 +336,10 @@ function processImageWithReference() {
                 
                 // Check if contour is roughly circular (width ≈ height)
                 const aspectRatio = Math.min(rect.width, rect.height) / Math.max(rect.width, rect.height);
+                const area = cv.contourArea(contour);
                 
-                if (distance < 150 && aspectRatio > 0.7 && distance < minDistance) {
+                // Reference object should be small and near click point
+                if (distance < 150 && aspectRatio > 0.7 && area > 50 && area < 5000 && distance < minDistance) {
                     minDistance = distance;
                     referenceContour = contour;
                     referenceRect = rect;
@@ -259,17 +351,18 @@ function processImageWithReference() {
                 const referencePixelDiameter = (referenceRect.width + referenceRect.height) / 2;
                 
                 // Get actual reference diameter in cm
-                let referenceDiameterCm;
                 const refType = document.getElementById('refType').value;
+                let referenceDiameterCm;
                 
-                if (refType === 'coin') {
-                    referenceDiameterCm = 2.5;
-                } else if (refType === 'coin2') {
-                    referenceDiameterCm = 2.7;
-                } else if (refType === 'coin5') {
-                    referenceDiameterCm = 2.5;
-                } else {
+                if (refType === 'custom') {
                     referenceDiameterCm = parseFloat(document.getElementById('refDiameter').value) || 2.5;
+                } else {
+                    referenceDiameterCm = parseFloat(refType);
+                }
+                
+                // Validate reference diameter
+                if (isNaN(referenceDiameterCm) || referenceDiameterCm <= 0) {
+                    referenceDiameterCm = 2.5;
                 }
                 
                 // Calculate pixel to cm ratio
@@ -282,18 +375,15 @@ function processImageWithReference() {
                 // Display on processed canvas
                 displayProcessedImage(src, contours, largestContour, referenceContour);
                 
-                // Calculate and display drape coefficient
-                const drapeCoefficient = calculateDrapeCoefficient(actualArea);
-                if (drapeCoefficient !== null) {
-                    document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-                }
+                // Enable calculate button
+                document.getElementById('calculateDrape').disabled = false;
                 
-                document.getElementById('status').textContent = 'Analysis complete';
+                status.textContent = 'Analysis complete. Click "Calculate Drape %"';
             } else {
-                document.getElementById('status').textContent = 'Reference object not found near clicked point';
+                status.textContent = 'Reference object not found near clicked point';
             }
         } else {
-            document.getElementById('status').textContent = 'No drape contour found';
+            status.textContent = 'No drape contour found';
         }
         
         // Cleanup
@@ -304,18 +394,24 @@ function processImageWithReference() {
         hierarchy.delete();
     } catch (error) {
         console.error('Error processing image:', error);
-        document.getElementById('status').textContent = 'Error processing image';
+        status.textContent = 'Error processing image';
     }
 }
 
 // Display processed image with contours
 function displayProcessedImage(src, contours, drapeContour, refContour) {
     const processedCanvas = document.getElementById('processedCanvas');
-    const processedCtx = processedCanvas.getContext('2d');
+    const originalCanvas = document.getElementById('originalCanvas');
     
     // Set canvas size
     processedCanvas.width = capturedImage.width;
     processedCanvas.height = capturedImage.height;
+    originalCanvas.width = capturedImage.width;
+    originalCanvas.height = capturedImage.height;
+    
+    // Draw original image on original canvas
+    const originalCtx = originalCanvas.getContext('2d');
+    originalCtx.putImageData(capturedImage, 0, 0);
     
     // Create a copy of source for drawing
     const drawing = src.clone();
@@ -336,7 +432,7 @@ function displayProcessedImage(src, contours, drapeContour, refContour) {
     // Draw reference point
     cv.circle(drawing, new cv.Point(referencePoint.x, referencePoint.y), 10, [255, 0, 0, 255], 3);
     
-    // Display on canvas
+    // Display on processed canvas
     cv.imshow(processedCanvas, drawing);
     
     // Cleanup
@@ -345,29 +441,10 @@ function displayProcessedImage(src, contours, drapeContour, refContour) {
     refContours.delete();
 }
 
-// Calculate drape coefficient
-function calculateDrapeCoefficient(measuredArea) {
-    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value);
-    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value);
-    
-    if (!diskDiameter || !fabricDiameter || isNaN(diskDiameter) || isNaN(fabricDiameter)) {
-        alert('Please enter valid diameters for disk and fabric');
-        return null;
-    }
-    
-    // Calculate areas
-    const diskArea = Math.PI * Math.pow(diskDiameter / 2, 2);
-    const fabricArea = Math.PI * Math.pow(fabricDiameter / 2, 2);
-    
-    // Calculate drape percentage using standard formula
-    const drapePercentage = ((measuredArea - diskArea) / (fabricArea - diskArea)) * 100;
-    
-    return drapePercentage;
-}
-
 // Calculate Drape Percentage (called by button)
 function calculateDrapePercentage() {
     const measuredAreaText = document.getElementById('actualArea').textContent;
+    const status = document.getElementById('status');
     
     if (measuredAreaText === '--') {
         alert('Please capture and analyze an image first');
@@ -376,19 +453,51 @@ function calculateDrapePercentage() {
     
     const measuredArea = parseFloat(measuredAreaText);
     
-    if (isNaN(measuredArea)) {
-        alert('Please capture and analyze an image first');
+    if (isNaN(measuredArea) || measuredArea <= 0) {
+        alert('Invalid area measurement. Please analyze image again.');
         return;
     }
     
-    const drapeCoefficient = calculateDrapeCoefficient(measuredArea);
+    // Get diameters
+    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value);
+    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value);
     
-    if (drapeCoefficient !== null) {
-        document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-        
-        // Add to history
-        addToHistory(measuredArea, drapeCoefficient);
+    // Validate diameters
+    if (isNaN(diskDiameter) || diskDiameter <= 0) {
+        alert('Please enter a valid support disk diameter');
+        return;
     }
+    
+    if (isNaN(fabricDiameter) || fabricDiameter <= 0) {
+        alert('Please enter a valid fabric diameter');
+        return;
+    }
+    
+    if (fabricDiameter <= diskDiameter) {
+        alert('Fabric diameter must be larger than support disk diameter');
+        return;
+    }
+    
+    // Calculate areas
+    const diskArea = Math.PI * Math.pow(diskDiameter / 2, 2);
+    const fabricArea = Math.PI * Math.pow(fabricDiameter / 2, 2);
+    
+    // Calculate drape percentage using standard formula
+    // Drape Coefficient (%) = [(A - A_d) / (A_f - A_d)] × 100
+    const drapeCoefficient = ((measuredArea - diskArea) / (fabricArea - diskArea)) * 100;
+    
+    // Validate result
+    if (drapeCoefficient < 0 || drapeCoefficient > 100) {
+        status.textContent = 'Warning: Drape coefficient out of range (0-100%)';
+    } else {
+        status.textContent = 'Calculation complete';
+    }
+    
+    // Display result
+    document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
+    
+    // Add to history
+    addToHistory(measuredArea, drapeCoefficient);
 }
 
 // Add measurement to history
@@ -402,13 +511,13 @@ function addToHistory(area, drapePercent) {
         date: dateString,
         time: timeString,
         area: area.toFixed(2),
-        drapePercent: drapePercent.toFixed(2),
+        drapePercent: Math.min(100, Math.max(0, drapePercent)).toFixed(2),
         timestamp: now.toISOString()
     };
     
-    measurementHistory.unshift(measurement); // Add to beginning
+    measurementHistory.unshift(measurement);
     if (measurementHistory.length > 20) {
-        measurementHistory.pop(); // Keep only last 20 measurements
+        measurementHistory.pop();
     }
     
     updateHistoryTable();
@@ -443,6 +552,15 @@ function deleteMeasurement(id) {
     measurementHistory = measurementHistory.filter(m => m.id !== id);
     updateHistoryTable();
     saveHistory();
+}
+
+// Clear all history
+function clearHistory() {
+    if (confirm('Are you sure you want to clear all measurement history?')) {
+        measurementHistory = [];
+        updateHistoryTable();
+        saveHistory();
+    }
 }
 
 // Save history to localStorage
@@ -494,11 +612,73 @@ function exportToCSV() {
     window.URL.revokeObjectURL(url);
 }
 
+// Setup device orientation for level indicator
+function setupDeviceOrientation() {
+    if (typeof DeviceOrientationEvent !== 'undefined' && 
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // iOS 13+ devices need permission
+        DeviceOrientationEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    window.addEventListener('deviceorientation', handleDeviceOrientation);
+                }
+            })
+            .catch(console.error);
+    } else {
+        // Android and other devices
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+    }
+}
+
+// Handle device orientation for level indicator
+function handleDeviceOrientation(event) {
+    const bubbleCenter = document.querySelector('.bubble-center');
+    const levelStatus = document.getElementById('levelStatus');
+    
+    if (!bubbleCenter || !levelStatus) return;
+    
+    // Use beta (front-to-back tilt) for angle
+    const beta = event.beta || 0; // -180 to 180
+    const gamma = event.gamma || 0; // -90 to 90
+    
+    // Calculate angle from vertical (absolute value)
+    const angle = Math.min(Math.abs(beta), Math.abs(gamma));
+    
+    // Update angle display
+    levelStatus.textContent = angle.toFixed(1);
+    
+    // Calculate bubble position
+    const maxTilt = 45;
+    const maxMovement = 18;
+    
+    const normX = Math.max(Math.min(gamma / maxTilt, 1), -1);
+    const normY = Math.max(Math.min(beta / maxTilt, 1), -1);
+    
+    const posX = normX * maxMovement;
+    const posY = normY * maxMovement;
+    
+    bubbleCenter.style.transform = `translate(-50%, -50%) translate(${posX}px, ${posY}px)`;
+    
+    // Update color based on angle
+    if (angle < 2) {
+        bubbleCenter.style.background = '#00ff00';
+        levelStatus.style.color = '#00ff00';
+    } else if (angle < 5) {
+        bubbleCenter.style.background = '#ffff00';
+        levelStatus.style.color = '#ffff00';
+    } else {
+        bubbleCenter.style.background = '#ff0000';
+        levelStatus.style.color = '#ff0000';
+    }
+}
+
 // Reset application
 function resetApp() {
     const video = document.getElementById('video');
     const outputCanvas = document.getElementById('outputCanvas');
     const processedCanvas = document.getElementById('processedCanvas');
+    const originalCanvas = document.getElementById('originalCanvas');
+    const status = document.getElementById('status');
     
     // Stop camera
     if (stream) {
@@ -513,19 +693,23 @@ function resetApp() {
     // Clear canvases
     const ctx1 = outputCanvas.getContext('2d');
     const ctx2 = processedCanvas.getContext('2d');
+    const ctx3 = originalCanvas.getContext('2d');
     ctx1.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
     ctx2.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+    ctx3.clearRect(0, 0, originalCanvas.width, originalCanvas.height);
     
     // Reset results
     document.getElementById('pixelArea').textContent = '--';
     document.getElementById('actualArea').textContent = '--';
     document.getElementById('drapeCoefficient').textContent = '--';
-    document.getElementById('status').textContent = 'Ready';
+    document.getElementById('calculateDrape').disabled = true;
+    status.textContent = 'Ready';
     
     // Reset buttons
     document.getElementById('capture').disabled = true;
     document.getElementById('reset').disabled = true;
     document.getElementById('startCamera').disabled = false;
+    document.getElementById('uploadImage').disabled = false;
     
     // Clear stored data
     capturedImage = null;
@@ -535,26 +719,22 @@ function resetApp() {
     // Remove event listeners from canvas
     outputCanvas.style.cursor = 'default';
     outputCanvas.removeEventListener('click', handleCanvasClick);
+    
+    // Clear file input
+    document.getElementById('fileInput').value = '';
 }
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    // Add CSS for small buttons
-    const style = document.createElement('style');
-    style.textContent = `
-        .btn-small {
-            padding: 5px 10px;
-            background: #e74c3c;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .btn-small:hover {
-            background: #c0392b;
-        }
-    `;
-    document.head.appendChild(style);
-    
     console.log('Drape Area Calculator initialized');
+    
+    // Set default values
+    document.getElementById('diskDiameter').value = '18.0';
+    document.getElementById('fabricDiameter').value = '30.0';
+    document.getElementById('refDiameter').value = '2.5';
+    
+    // Check if OpenCV is already loaded
+    if (typeof cv !== 'undefined') {
+        onOpenCvReady();
+    }
 });
