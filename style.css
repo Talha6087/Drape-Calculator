@@ -798,3 +798,81 @@ tbody tr:hover {
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
+/* Add to style.css */
+#loadingIndicator {
+    text-align: center;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+}
+
+.loader {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #3498db;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 15px;
+}
+
+/* Better canvas styling */
+.display-canvas {
+    background: #f8f9fa;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    cursor: crosshair !important;
+}
+
+.display-canvas:hover {
+    border-color: #3498db;
+}
+
+/* Status indicator */
+#status {
+    padding: 8px 12px;
+    border-radius: 5px;
+    background: #f8f9fa;
+    display: inline-block;
+    min-width: 200px;
+}
+
+#status.processing {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+#status.success {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+#status.error {
+    background: #ffebee;
+    color: #d32f2f;
+}
+
+/* Enhanced button states */
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.btn.loading {
+    position: relative;
+    color: transparent;
+}
+
+.btn.loading::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-top: -10px;
+    margin-left: -10px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
