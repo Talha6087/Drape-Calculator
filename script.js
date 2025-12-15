@@ -1,5 +1,4 @@
 // Drape Area Calculator - Complete Script with all features
-// Features: Camera leveler, image upload, auto-highlight, batch processing
 
 // Global variables
 let stream = null;
@@ -12,8 +11,6 @@ let canvasDisplayHeight = 0;
 let canvasActualWidth = 0;
 let canvasActualHeight = 0;
 let measurementHistory = [];
-let batchMode = false;
-let batchMeasurements = [];
 let levelInterval = null;
 let currentAngle = 0;
 let isProcessing = false;
@@ -68,12 +65,6 @@ function initializeEventListeners() {
     // Clear History button
     document.getElementById('clearHistory').addEventListener('click', clearHistory);
     
-    // Start Batch Mode button
-    document.getElementById('startBatch').addEventListener('click', startBatchMode);
-    
-    // End Batch Mode button
-    document.getElementById('endBatch').addEventListener('click', endBatchMode);
-    
     // Auto-highlight checkbox
     document.getElementById('autoHighlight').addEventListener('change', function() {
         if (capturedImage && referencePoint) {
@@ -97,12 +88,16 @@ function initializeEventListeners() {
 function setupAccelerometer() {
     if (!DeviceUtils.hasAccelerometer()) {
         console.log('Accelerometer not available');
+        // Fallback for desktop testing
+        startDesktopLevelSimulation();
         return;
     }
     
     DeviceUtils.requestAccelerometerPermission().then(granted => {
         if (granted) {
             startLevelMonitoring();
+        } else {
+            startDesktopLevelSimulation();
         }
     });
 }
@@ -111,43 +106,51 @@ function setupAccelerometer() {
 function startLevelMonitoring() {
     if (levelInterval) clearInterval(levelInterval);
     
-    if (window.DeviceMotionEvent) {
+    // Try DeviceOrientation API first (more accurate for tilt)
+    if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+        console.log('Using DeviceOrientation API for level detection');
+    } else if (window.DeviceMotionEvent) {
+        // Fallback to DeviceMotion API
         window.addEventListener('devicemotion', handleDeviceMotion);
+        console.log('Using DeviceMotion API for level detection');
     } else {
-        // Fallback: simulate level for desktop
-        levelInterval = setInterval(() => {
-            if (streaming) {
-                // Simulate small random movement for testing
-                const simulatedAngle = Math.random() * 5;
-                UIUtils.updateLevelIndicator(simulatedAngle);
-            }
-        }, 500);
+        startDesktopLevelSimulation();
     }
 }
 
-// Handle device motion for level detection
-// Handle device motion for level detection - IMPROVED
-function handleDeviceMotion(event) {
-    if (!event.accelerationIncludingGravity) return;
+// Desktop simulation for testing
+function startDesktopLevelSimulation() {
+    console.log('Using desktop level simulation');
+    if (levelInterval) clearInterval(levelInterval);
     
-    const accel = event.accelerationIncludingGravity;
+    levelInterval = setInterval(() => {
+        if (streaming) {
+            // Simulate small random movement for testing
+            const simulatedAngle = Math.random() * 5;
+            const simulatedBeta = (Math.random() - 0.5) * 10;
+            const simulatedGamma = (Math.random() - 0.5) * 10;
+            
+            UIUtils.updateLevelIndicator(simulatedAngle, simulatedBeta, simulatedGamma);
+        }
+    }, 1000);
+}
+
+// Handle device orientation (more accurate for mobile)
+function handleDeviceOrientation(event) {
+    // beta: front-to-back tilt (-180 to 180)
+    // gamma: left-to-right tilt (-90 to 90)
+    // alpha: compass direction (0-360)
     
-    // Calculate tilt angles in degrees
-    // Using more accurate formulas for device orientation
-    const x = accel.x || 0;
-    const y = accel.y || 0;
-    const z = accel.z || 9.81; // Default to gravity
+    const beta = event.beta || 0;  // Front-to-back tilt
+    const gamma = event.gamma || 0; // Left-to-right tilt
     
-    // Calculate tilt angles
-    const angleX = Math.atan2(x, Math.sqrt(y * y + z * z)) * (180 / Math.PI);
-    const angleY = Math.atan2(y, Math.sqrt(x * x + z * z)) * (180 / Math.PI);
-    
-    // Use the maximum tilt angle
-    const angle = Math.max(Math.abs(angleX), Math.abs(angleY));
+    // Calculate overall tilt angle
+    const angle = Math.sqrt(beta * beta + gamma * gamma);
     currentAngle = angle;
     
-    // Update the level indicator
-    UIUtils.updateLevelIndicator(angle);
+    // Update level indicator with both angle and tilt values
+    UIUtils.updateLevelIndicator(angle, beta, gamma);
     
     // Show warning if angle is too large
     if (streaming && angle > 10) {
@@ -155,84 +158,117 @@ function handleDeviceMotion(event) {
     }
 }
 
-// Alternative: Use device orientation API (often more accurate on mobile)
-function setupAccelerometer() {
-    if (!DeviceUtils.hasAccelerometer()) {
-        console.log('Accelerometer not available');
-        // Fallback for desktop testing
-        levelInterval = setInterval(() => {
-            if (streaming) {
-                // Simulate small random movement for testing
-                const simulatedAngle = Math.random() * 10;
-                UIUtils.updateLevelIndicator(simulatedAngle);
-            }
-        }, 1000);
-        return;
-    }
+// Handle device motion (fallback)
+function handleDeviceMotion(event) {
+    if (!event.accelerationIncludingGravity) return;
     
-    // Try DeviceOrientation API first (more accurate for tilt)
-    if (window.DeviceOrientationEvent) {
-        window.addEventListener('deviceorientation', handleDeviceOrientation);
-    } else if (window.DeviceMotionEvent) {
-        // Fallback to DeviceMotion API
-        window.addEventListener('devicemotion', handleDeviceMotion);
-    }
+    const accel = event.accelerationIncludingGravity;
     
-    // Request permission for iOS 13+
-    DeviceUtils.requestAccelerometerPermission().then(granted => {
-        if (!granted) {
-            console.log('Accelerometer permission denied');
-        }
-    });
-}
-
-// Device orientation handler (more accurate for tilt)
-function handleDeviceOrientation(event) {
-    // Beta is the front-to-back tilt in degrees (-180 to 180)
-    // Gamma is the left-to-right tilt in degrees (-90 to 90)
-    const beta = event.beta || 0; // Front-to-back tilt
-    const gamma = event.gamma || 0; // Left-to-right tilt
+    // Calculate approximate tilt angles from acceleration
+    const x = accel.x || 0;
+    const y = accel.y || 0;
+    const z = accel.z || 9.81;
     
-    // Calculate overall tilt angle
+    // Convert to approximate beta and gamma
+    const beta = Math.atan2(x, Math.sqrt(y*y + z*z)) * (180 / Math.PI);
+    const gamma = Math.atan2(y, Math.sqrt(x*x + z*z)) * (180 / Math.PI);
+    
     const angle = Math.sqrt(beta * beta + gamma * gamma);
     currentAngle = angle;
     
-    // Update level indicator
-    UIUtils.updateLevelIndicator(angle);
+    UIUtils.updateLevelIndicator(angle, beta, gamma);
     
-    // Update bubble position based on actual tilt
-    updateBubblePosition(beta, gamma);
-    
-    // Show warning if needed
     if (streaming && angle > 10) {
         document.getElementById('status').textContent = `Warning: Camera tilted ${angle.toFixed(1)}°. Level your device.`;
     }
 }
 
-// Update bubble position based on X/Y tilt
-function updateBubblePosition(beta, gamma) {
-    const bubbleCenter = document.querySelector('.bubble-center');
-    if (!bubbleCenter) return;
+// Validate diameters
+function validateDiameters() {
+    const diskDiameter = parseFloat(document.getElementById('diskDiameter').value);
+    const fabricDiameter = parseFloat(document.getElementById('fabricDiameter').value);
     
-    // Normalize tilt values to -1 to 1 range
-    const maxTilt = 30; // Maximum tilt angle for full bubble movement
-    
-    // Calculate normalized positions
-    const normX = Math.max(Math.min(gamma / maxTilt, 1), -1);
-    const normY = Math.max(Math.min(beta / maxTilt, 1), -1);
-    
-    // Calculate movement (max 20px in any direction)
-    const maxMovement = 20;
-    const offsetX = normX * maxMovement;
-    const offsetY = normY * maxMovement;
-    
-    // Apply transform
-    bubbleCenter.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`;
+    const validation = Validation.validateDrapeInputs(diskDiameter, fabricDiameter);
+    if (!validation.valid) {
+        UIUtils.showToast(validation.error, 'warning');
+    }
 }
-// SIMPLIFIED UPLOAD FUNCTION - Use this if above doesn't work
+
+// Start camera function
+async function startCamera() {
+    if (streaming) return;
+    
+    const video = document.getElementById('video');
+    const statusElement = document.getElementById('status');
+    
+    // Check camera permissions and capabilities
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        UIUtils.showToast('Camera access not supported in this browser', 'error');
+        return;
+    }
+    
+    UIUtils.showLoading(true, 'Accessing camera...');
+    
+    try {
+        // Request camera access
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false 
+        });
+        
+        stream = mediaStream;
+        video.srcObject = stream;
+        
+        // Wait for video to start playing
+        await video.play();
+        
+        // Update UI
+        document.getElementById('startCamera').disabled = true;
+        document.getElementById('capture').disabled = false;
+        document.getElementById('reset').disabled = false;
+        document.getElementById('uploadImage').disabled = false;
+        
+        statusElement.textContent = 'Camera ready - Level your device above the drape';
+        streaming = true;
+        
+        UIUtils.showToast('Camera started successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+        let errorMessage = 'Unable to access camera. ';
+        
+        if (error.name === 'NotAllowedError') {
+            errorMessage += 'Please grant camera permissions.';
+        } else if (error.name === 'NotFoundError') {
+            errorMessage += 'No camera found.';
+        } else if (error.name === 'NotReadableError') {
+            errorMessage += 'Camera is already in use.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        statusElement.textContent = errorMessage;
+        UIUtils.showToast(errorMessage, 'error');
+    } finally {
+        UIUtils.showLoading(false);
+    }
+}
+
+// Handle image upload
 function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
+    
+    if (!file.type.match('image.*')) {
+        UIUtils.showToast('Please select an image file (JPEG, PNG, etc.)', 'error');
+        return;
+    }
+    
+    UIUtils.showLoading(true, 'Loading image...');
     
     const reader = new FileReader();
     
@@ -240,7 +276,6 @@ function handleImageUpload(event) {
         const img = new Image();
         
         img.onload = function() {
-            // Create canvas elements
             const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
             const originalCanvas = document.getElementById('originalCanvas');
@@ -248,21 +283,18 @@ function handleImageUpload(event) {
             // Hide video
             video.style.display = 'none';
             
-            // Set dimensions
-            const maxDisplayWidth = 800;
-            const maxDisplayHeight = 600;
+            // Calculate display dimensions
+            const maxDisplayWidth = originalCanvas.parentElement.clientWidth;
+            const maxDisplayHeight = 400;
             
             let displayWidth = img.width;
             let displayHeight = img.height;
             
-            // Scale for display while maintaining aspect ratio
+            // Maintain aspect ratio
             if (displayWidth > maxDisplayWidth || displayHeight > maxDisplayHeight) {
-                const scale = Math.min(
-                    maxDisplayWidth / displayWidth,
-                    maxDisplayHeight / displayHeight
-                );
-                displayWidth = Math.floor(displayWidth * scale);
-                displayHeight = Math.floor(displayHeight * scale);
+                const ratio = Math.min(maxDisplayWidth / displayWidth, maxDisplayHeight / displayHeight);
+                displayWidth = Math.floor(displayWidth * ratio);
+                displayHeight = Math.floor(displayHeight * ratio);
             }
             
             // Set canvas sizes
@@ -302,6 +334,8 @@ function handleImageUpload(event) {
             originalCanvas.style.cursor = 'crosshair';
             originalCanvas.addEventListener('click', handleCanvasClick);
             
+            referencePoint = null;
+            
             UIUtils.showToast('Image loaded. Click on the coin.', 'success');
         };
         
@@ -326,21 +360,30 @@ function captureImage() {
         return;
     }
     
-    if (currentAngle > 15) {
-        if (!confirm(`Camera is tilted ${currentAngle.toFixed(1)}°. Continue anyway?`)) {
-            return;
-        }
-    }
-    
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
-    const outputCanvas = document.getElementById('originalCanvas');
+    const originalCanvas = document.getElementById('originalCanvas');
     
     // Set canvas to video dimensions
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    outputCanvas.width = video.videoWidth;
-    outputCanvas.height = video.videoHeight;
+    
+    // Calculate display dimensions
+    const maxDisplayWidth = originalCanvas.parentElement.clientWidth;
+    const maxDisplayHeight = 400;
+    
+    let displayWidth = video.videoWidth;
+    let displayHeight = video.videoHeight;
+    
+    // Maintain aspect ratio
+    if (displayWidth > maxDisplayWidth || displayHeight > maxDisplayHeight) {
+        const ratio = Math.min(maxDisplayWidth / displayWidth, maxDisplayHeight / displayHeight);
+        displayWidth = Math.floor(displayWidth * ratio);
+        displayHeight = Math.floor(displayHeight * ratio);
+    }
+    
+    originalCanvas.width = displayWidth;
+    originalCanvas.height = displayHeight;
     
     // Draw current video frame to canvas
     const context = canvas.getContext('2d');
@@ -349,35 +392,32 @@ function captureImage() {
     // Store the image data
     capturedImage = context.getImageData(0, 0, canvas.width, canvas.height);
     
-    // Display the captured image on output canvas
-    const outputContext = outputCanvas.getContext('2d');
-    outputContext.putImageData(capturedImage, 0, 0);
+    // Display the captured image on original canvas
+    const originalCtx = originalCanvas.getContext('2d');
+    originalCtx.drawImage(video, 0, 0, displayWidth, displayHeight);
     
     // Show canvas, hide video
     video.style.display = 'none';
-    outputCanvas.style.display = 'block';
+    originalCanvas.style.display = 'block';
     
     // Update UI
     document.getElementById('status').textContent = 'Click on reference object (coin) in image';
     document.getElementById('capture').disabled = true;
     document.getElementById('startCamera').disabled = true;
-    document.getElementById('uploadImage').disabled = true;
+    document.getElementById('uploadImage').disabled = false;
     
     // Store canvas dimensions for click coordinate mapping
-    currentCanvas = outputCanvas;
-    canvasDisplayWidth = outputCanvas.offsetWidth;
-    canvasDisplayHeight = outputCanvas.offsetHeight;
-    canvasActualWidth = outputCanvas.width;
-    canvasActualHeight = outputCanvas.height;
+    currentCanvas = originalCanvas;
+    canvasDisplayWidth = originalCanvas.offsetWidth;
+    canvasDisplayHeight = originalCanvas.offsetHeight;
+    canvasActualWidth = originalCanvas.width;
+    canvasActualHeight = originalCanvas.height;
     
     // Enable canvas clicking for reference selection
-    outputCanvas.style.cursor = 'crosshair';
-    outputCanvas.addEventListener('click', handleCanvasClick);
+    originalCanvas.style.cursor = 'crosshair';
+    originalCanvas.addEventListener('click', handleCanvasClick);
     
-    // Auto-detect reference if enabled
-    if (document.getElementById('autoDetectReference').checked) {
-        setTimeout(autoDetectReference, 500);
-    }
+    referencePoint = null;
     
     UIUtils.showToast('Image captured. Click on reference object.', 'info');
 }
@@ -391,7 +431,7 @@ function handleCanvasClick(event) {
         const canvas = event.target;
         const rect = canvas.getBoundingClientRect();
         
-        // Calculate actual canvas coordinates (considering scaling)
+        // Calculate actual canvas coordinates
         const scaleX = canvasActualWidth / canvasDisplayWidth;
         const scaleY = canvasActualHeight / canvasDisplayHeight;
         
@@ -443,124 +483,125 @@ function autoDetectReference() {
     
     UIUtils.showLoading(true, 'Auto-detecting reference...');
     
-    try {
-        if (typeof cv === 'undefined') {
-            throw new Error('OpenCV not loaded');
-        }
-        
-        // Convert to grayscale
-        const src = cv.matFromImageData(capturedImage);
-        const gray = new cv.Mat();
-        const blurred = new cv.Mat();
-        const edges = new cv.Mat();
-        
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-        cv.Canny(blurred, edges, 50, 150);
-        
-        // Find contours
-        const contours = new cv.MatVector();
-        const hierarchy = new cv.Mat();
-        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-        
-        // Look for circular contours near center
-        const centerX = src.cols / 2;
-        const centerY = src.rows / 2;
-        let bestContour = null;
-        let bestScore = 0;
-        
-        for (let i = 0; i < contours.size(); i++) {
-            const contour = contours.get(i);
-            const area = cv.contourArea(contour);
-            
-            // Filter by size (look for coin-sized objects)
-            if (area < 100 || area > 10000) continue;
-            
-            // Get bounding rect
-            const rect = cv.boundingRect(contour);
-            const contourCenterX = rect.x + rect.width / 2;
-            const contourCenterY = rect.y + rect.height / 2;
-            
-            // Check if near center (within 1/3 of image)
-            const distanceToCenter = Math.sqrt(
-                Math.pow(contourCenterX - centerX, 2) + 
-                Math.pow(contourCenterY - centerY, 2)
-            );
-            
-            const maxDistance = Math.min(src.cols, src.rows) / 3;
-            if (distanceToCenter > maxDistance) continue;
-            
-            // Check circularity
-            const perimeter = cv.arcLength(contour, true);
-            const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-            
-            // Score based on circularity and distance to center
-            const score = circularity * (1 - (distanceToCenter / maxDistance));
-            
-            if (score > bestScore) {
-                bestScore = score;
-                bestContour = contour;
+    setTimeout(() => {
+        try {
+            if (typeof cv === 'undefined') {
+                throw new Error('OpenCV not loaded');
             }
+            
+            // Convert to OpenCV mat
+            const src = cv.matFromImageData(capturedImage);
+            const gray = new cv.Mat();
+            const blurred = new cv.Mat();
+            const edges = new cv.Mat();
+            
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+            cv.Canny(blurred, edges, 50, 150);
+            
+            // Find contours
+            const contours = new cv.MatVector();
+            const hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            
+            // Look for circular contours
+            let bestContour = null;
+            let bestScore = 0;
+            const centerX = src.cols / 2;
+            const centerY = src.rows / 2;
+            
+            for (let i = 0; i < contours.size(); i++) {
+                const contour = contours.get(i);
+                const area = cv.contourArea(contour);
+                
+                // Filter by size (coin-sized objects)
+                if (area < 100 || area > 10000) continue;
+                
+                const rect = cv.boundingRect(contour);
+                const contourCenterX = rect.x + rect.width / 2;
+                const contourCenterY = rect.y + rect.height / 2;
+                
+                // Distance from center
+                const distance = Math.sqrt(
+                    Math.pow(contourCenterX - centerX, 2) + 
+                    Math.pow(contourCenterY - centerY, 2)
+                );
+                
+                // Circularity
+                const perimeter = cv.arcLength(contour, true);
+                const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+                
+                // Aspect ratio
+                const aspectRatio = Math.min(rect.width, rect.height) / Math.max(rect.width, rect.height);
+                
+                // Score based on multiple factors
+                const score = circularity * aspectRatio * (1 - Math.min(distance / 500, 1));
+                
+                if (score > bestScore && circularity > 0.5 && aspectRatio > 0.7) {
+                    bestScore = score;
+                    bestContour = contour;
+                }
+            }
+            
+            if (bestContour && bestScore > 0.3) {
+                const rect = cv.boundingRect(bestContour);
+                const referenceX = rect.x + rect.width / 2;
+                const referenceY = rect.y + rect.height / 2;
+                
+                // Scale to display coordinates
+                const scaleX = canvasDisplayWidth / canvasActualWidth;
+                const scaleY = canvasDisplayHeight / canvasActualHeight;
+                
+                referencePoint = {
+                    x: referenceX,
+                    y: referenceY,
+                    displayX: referenceX * scaleX,
+                    displayY: referenceY * scaleY
+                };
+                
+                // Draw marker on canvas
+                const canvas = document.getElementById('originalCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                ctx.beginPath();
+                ctx.arc(referencePoint.displayX, referencePoint.displayY, 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Add text
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 14px Arial';
+                ctx.fillText('Auto-detected', referencePoint.displayX - 40, referencePoint.displayY - 15);
+                
+                canvas.style.cursor = 'default';
+                canvas.removeEventListener('click', handleCanvasClick);
+                
+                UIUtils.showToast('Reference auto-detected successfully', 'success');
+                
+                // Process image
+                setTimeout(() => processImageWithReference(), 500);
+            } else {
+                UIUtils.showToast('Could not auto-detect reference. Please click manually.', 'warning');
+            }
+            
+            // Cleanup
+            src.delete();
+            gray.delete();
+            blurred.delete();
+            edges.delete();
+            contours.delete();
+            hierarchy.delete();
+            
+        } catch (error) {
+            console.error('Auto-detect error:', error);
+            UIUtils.showToast('Auto-detect failed: ' + error.message, 'error');
+        } finally {
+            UIUtils.showLoading(false);
         }
-        
-        if (bestContour && bestScore > 0.3) {
-            const rect = cv.boundingRect(bestContour);
-            const referenceX = rect.x + rect.width / 2;
-            const referenceY = rect.y + rect.height / 2;
-            
-            // Scale to display coordinates
-            const scaleX = canvasDisplayWidth / canvasActualWidth;
-            const scaleY = canvasDisplayHeight / canvasActualHeight;
-            
-            referencePoint = {
-                x: referenceX,
-                y: referenceY,
-                displayX: referenceX * scaleX,
-                displayY: referenceY * scaleY
-            };
-            
-            // Draw marker on canvas
-            const canvas = document.getElementById('originalCanvas');
-            const ctx = canvas.getContext('2d');
-            
-            ctx.beginPath();
-            ctx.arc(referencePoint.displayX, referencePoint.displayY, 10, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-            ctx.fill();
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            // Add text
-            ctx.fillStyle = 'white';
-            ctx.font = 'bold 14px Arial';
-            ctx.fillText('Auto-detected', referencePoint.displayX - 40, referencePoint.displayY - 15);
-            
-            canvas.style.cursor = 'default';
-            canvas.removeEventListener('click', handleCanvasClick);
-            
-            UIUtils.showToast('Reference auto-detected successfully', 'success');
-            
-            // Process image
-            setTimeout(() => processImageWithReference(), 500);
-        } else {
-            UIUtils.showToast('Could not auto-detect reference. Please click manually.', 'warning');
-        }
-        
-        // Cleanup
-        src.delete();
-        gray.delete();
-        blurred.delete();
-        edges.delete();
-        contours.delete();
-        hierarchy.delete();
-        
-    } catch (error) {
-        console.error('Auto-detect error:', error);
-        UIUtils.showToast('Auto-detect failed: ' + error.message, 'error');
-    } finally {
-        UIUtils.showLoading(false);
-    }
+    }, 500);
 }
 
 // Process image with reference point
@@ -576,7 +617,6 @@ async function processImageWithReference() {
             throw new Error('OpenCV not loaded yet');
         }
         
-        // Convert to OpenCV mat
         const src = cv.matFromImageData(capturedImage);
         
         // Validate image
@@ -585,16 +625,13 @@ async function processImageWithReference() {
             throw new Error(validation.error);
         }
         
-        // Process image in steps
+        // Process image
         const gray = new cv.Mat();
         const blurred = new cv.Mat();
         const edges = new cv.Mat();
         
-        // Convert to grayscale and blur
         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
         cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-        
-        // Detect edges
         cv.Canny(blurred, edges, 50, 150);
         
         // Find contours
@@ -602,7 +639,7 @@ async function processImageWithReference() {
         const hierarchy = new cv.Mat();
         cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
-        // Find largest contour (likely the drape)
+        // Find largest contour
         let largestContour = null;
         let maxArea = 0;
         
@@ -610,7 +647,6 @@ async function processImageWithReference() {
             const contour = contours.get(i);
             const area = cv.contourArea(contour);
             
-            // Ignore very small contours
             if (area > maxArea && area > 1000) {
                 maxArea = area;
                 largestContour = contour;
@@ -625,7 +661,7 @@ async function processImageWithReference() {
         const pixelArea = maxArea;
         document.getElementById('pixelArea').textContent = pixelArea.toFixed(0);
         
-        // Find reference object near the clicked point
+        // Find reference object
         let referenceContour = null;
         let referenceRect = null;
         let minDistance = Infinity;
@@ -634,7 +670,6 @@ async function processImageWithReference() {
             const contour = contours.get(i);
             const rect = cv.boundingRect(contour);
             
-            // Check if contour is near reference point
             const contourCenterX = rect.x + rect.width / 2;
             const contourCenterY = rect.y + rect.height / 2;
             
@@ -643,15 +678,10 @@ async function processImageWithReference() {
                 Math.pow(contourCenterY - referencePoint.y, 2)
             );
             
-            // Check if contour is roughly circular
             const aspectRatio = Math.min(rect.width, rect.height) / Math.max(rect.width, rect.height);
             const area = cv.contourArea(contour);
-            const perimeter = cv.arcLength(contour, true);
-            const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
             
-            // Look for coin-sized, circular objects near click point
-            if (distance < 200 && aspectRatio > 0.7 && circularity > 0.5 && 
-                area > 100 && area < 10000 && distance < minDistance) {
+            if (distance < 200 && aspectRatio > 0.7 && area > 100 && area < 10000 && distance < minDistance) {
                 minDistance = distance;
                 referenceContour = contour;
                 referenceRect = rect;
@@ -665,7 +695,7 @@ async function processImageWithReference() {
         // Calculate reference diameter in pixels
         const referencePixelDiameter = (referenceRect.width + referenceRect.height) / 2;
         
-        // Get actual reference diameter in cm - UPDATED WITH NEW COIN SIZES
+        // Get actual reference diameter in cm
         let referenceDiameterCm;
         const refType = document.getElementById('refType').value;
         
@@ -691,8 +721,6 @@ async function processImageWithReference() {
         const drapeCoefficient = calculateDrapeCoefficient(actualArea);
         if (drapeCoefficient !== null) {
             document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-            
-            // Add to history if not in batch mode
             addToHistory(actualArea, drapeCoefficient);
         }
         
@@ -715,15 +743,20 @@ async function processImageWithReference() {
         UIUtils.showLoading(false);
         isProcessing = false;
     }
-    }
+}
+
 // Display processed image with contours
 function displayProcessedImage(src, contours, drapeContour, refContour) {
     const processedCanvas = document.getElementById('processedCanvas');
     const processedCtx = processedCanvas.getContext('2d');
     
-    // Set canvas size
-    processedCanvas.width = capturedImage.width;
-    processedCanvas.height = capturedImage.height;
+    // Set canvas size to match original
+    const originalCanvas = document.getElementById('originalCanvas');
+    processedCanvas.width = originalCanvas.width;
+    processedCanvas.height = originalCanvas.height;
+    
+    // Make sure processed canvas is visible
+    processedCanvas.style.display = 'block';
     
     // Create a copy of source for drawing
     const drawing = src.clone();
@@ -731,43 +764,24 @@ function displayProcessedImage(src, contours, drapeContour, refContour) {
     // Convert to BGR for OpenCV drawing
     cv.cvtColor(drawing, drawing, cv.COLOR_RGBA2BGR);
     
-    // Draw all contours in light green
-    cv.drawContours(drawing, contours, -1, [0, 200, 0, 255], 1);
+    // Scale for display
+    const scaleX = processedCanvas.width / src.cols;
+    const scaleY = processedCanvas.height / src.rows;
     
-    // Draw drape contour in blue
-    const drapeContours = new cv.MatVector();
-    drapeContours.push_back(drapeContour);
-    cv.drawContours(drawing, drapeContours, 0, [255, 0, 0, 255], 3);
-    
-    // Draw reference contour in yellow
-    const refContours = new cv.MatVector();
-    refContours.push_back(refContour);
-    cv.drawContours(drawing, refContours, 0, [0, 255, 255, 255], 2);
+    const resized = new cv.Mat();
+    cv.resize(drawing, resized, new cv.Size(processedCanvas.width, processedCanvas.height));
     
     // Draw reference point
-    cv.circle(drawing, new cv.Point(referencePoint.x, referencePoint.y), 10, [0, 0, 255, 255], 3);
-    
-    // Highlight drape area if auto-highlight is enabled
-    if (document.getElementById('autoHighlight').checked) {
-        // Create a mask for the drape area
-        const mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC3);
-        cv.drawContours(mask, drapeContours, 0, [255, 255, 255, 255], -1);
-        
-        // Apply highlight color
-        const highlight = new cv.Mat(src.rows, src.cols, src.type(), [0, 0, 255, 100]);
-        cv.addWeighted(drawing, 1, highlight, 0.3, 0, drawing);
-        
-        mask.delete();
-        highlight.delete();
-    }
+    const displayRefX = referencePoint.x * scaleX;
+    const displayRefY = referencePoint.y * scaleY;
+    cv.circle(resized, new cv.Point(displayRefX, displayRefY), 10, [0, 0, 255, 255], 3);
     
     // Display on canvas
-    cv.imshow(processedCanvas, drawing);
+    cv.imshow(processedCanvas, resized);
     
     // Cleanup
     drawing.delete();
-    drapeContours.delete();
-    refContours.delete();
+    resized.delete();
 }
 
 // Calculate drape coefficient
@@ -782,36 +796,30 @@ function calculateDrapeCoefficient(measuredArea) {
         return null;
     }
     
-    // Calculate areas
-    const diskArea = DrapeFormulas.circleArea(diskDiameter);
-    const fabricArea = DrapeFormulas.circleArea(fabricDiameter);
-    
-    // Calculate drape percentage using standard formula
+    // Calculate drape percentage
     const drapePercentage = DrapeFormulas.drapeCoefficient(measuredArea, diskDiameter, fabricDiameter);
     
     return drapePercentage;
 }
 
-// Auto calculate drape (automatic process)
+// Auto calculate drape
 function autoCalculateDrape() {
     if (!capturedImage) {
         UIUtils.showToast('Please capture or upload an image first', 'error');
         return;
     }
     
-    // Auto-detect reference if not already done
     if (!referencePoint && document.getElementById('autoDetectReference').checked) {
         autoDetectReference();
     } else if (!referencePoint) {
         UIUtils.showToast('Please select reference point first', 'warning');
         return;
+    } else {
+        processImageWithReference();
     }
-    
-    // Process image
-    processImageWithReference();
 }
 
-// Calculate Drape Percentage (called by button)
+// Calculate Drape Percentage
 function calculateDrapePercentage() {
     const measuredAreaText = document.getElementById('actualArea').textContent;
     
@@ -831,8 +839,6 @@ function calculateDrapePercentage() {
     
     if (drapeCoefficient !== null) {
         document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
-        
-        // Add to history
         addToHistory(measuredArea, drapeCoefficient);
     }
 }
@@ -944,73 +950,6 @@ function exportToCSV() {
     UIUtils.showToast('Data exported successfully', 'success');
 }
 
-// Start batch mode
-function startBatchMode() {
-    batchMode = true;
-    batchMeasurements = [];
-    
-    // Show batch section
-    document.querySelector('.batch-mode').style.display = 'block';
-    document.querySelector('.batch-mode').classList.add('active');
-    
-    // Update buttons
-    document.getElementById('startBatch').disabled = true;
-    document.getElementById('endBatch').disabled = false;
-    
-    UIUtils.showToast('Batch mode started. Capture multiple measurements.', 'info');
-    updateBatchInfo();
-}
-
-// End batch mode
-function endBatchMode() {
-    if (batchMeasurements.length === 0) {
-        UIUtils.showToast('No batch measurements recorded', 'warning');
-    } else {
-        // Add all batch measurements to history
-        batchMeasurements.forEach(measurement => {
-            addToHistory(measurement.area, measurement.drapeCoefficient);
-        });
-        
-        UIUtils.showToast(`${batchMeasurements.length} measurements added to history`, 'success');
-    }
-    
-    batchMode = false;
-    batchMeasurements = [];
-    
-    // Hide batch section
-    document.querySelector('.batch-mode').style.display = 'none';
-    document.querySelector('.batch-mode').classList.remove('active');
-    
-    // Update buttons
-    document.getElementById('startBatch').disabled = false;
-    document.getElementById('endBatch').disabled = true;
-    
-    updateBatchInfo();
-}
-
-// Update batch info display
-function updateBatchInfo() {
-    const batchInfo = document.getElementById('batchInfo');
-    
-    if (batchMeasurements.length === 0) {
-        batchInfo.innerHTML = '<p>No batch measurements yet. Capture images to add measurements.</p>';
-    } else {
-        batchInfo.innerHTML = `
-            <p><strong>Batch Measurements:</strong> ${batchMeasurements.length} recorded</p>
-            <p><strong>Average Drape:</strong> ${calculateAverageDrape().toFixed(2)}%</p>
-            <p><strong>Last Measurement:</strong> ${batchMeasurements[batchMeasurements.length - 1].area.toFixed(2)} cm²</p>
-        `;
-    }
-}
-
-// Calculate average drape from batch
-function calculateAverageDrape() {
-    if (batchMeasurements.length === 0) return 0;
-    
-    const total = batchMeasurements.reduce((sum, m) => sum + m.drapeCoefficient, 0);
-    return total / batchMeasurements.length;
-}
-
 // Reset application
 function resetApp() {
     const video = document.getElementById('video');
@@ -1033,15 +972,26 @@ function resetApp() {
         window.removeEventListener('devicemotion', handleDeviceMotion);
     }
     
+    if (window.DeviceOrientationEvent) {
+        window.removeEventListener('deviceorientation', handleDeviceOrientation);
+    }
+    
     // Reset displays
     video.style.display = 'block';
     originalCanvas.style.display = 'none';
+    processedCanvas.style.display = 'none';
     
     // Clear canvases
     const ctx1 = originalCanvas.getContext('2d');
     const ctx2 = processedCanvas.getContext('2d');
     ctx1.clearRect(0, 0, originalCanvas.width, originalCanvas.height);
     ctx2.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+    
+    // Reset canvas dimensions
+    originalCanvas.width = 0;
+    originalCanvas.height = 0;
+    processedCanvas.width = 0;
+    processedCanvas.height = 0;
     
     // Reset results
     document.getElementById('pixelArea').textContent = '--';
@@ -1066,14 +1016,15 @@ function resetApp() {
     originalCanvas.removeEventListener('click', handleCanvasClick);
     
     // Reset level indicator
-    UIUtils.updateLevelIndicator(0);
+    UIUtils.resetLevelIndicator();
+    currentAngle = 0;
     
     UIUtils.showToast('Application reset', 'info');
 }
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Drape Area Calculator initialized with all features');
+    console.log('Drape Area Calculator initialized');
     
     // Check if on mobile
     if (DeviceUtils.isMobile()) {
