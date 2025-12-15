@@ -654,16 +654,14 @@ async function processImageWithReference() {
         // Calculate reference diameter in pixels
         const referencePixelDiameter = (referenceRect.width + referenceRect.height) / 2;
         
-        // Get actual reference diameter in cm
+        // Get actual reference diameter in cm - UPDATED WITH NEW COIN SIZES
         let referenceDiameterCm;
         const refType = document.getElementById('refType').value;
         
-        if (refType === 'coin') {
-            referenceDiameterCm = 2.5;
-        } else if (refType === 'coin2') {
-            referenceDiameterCm = 2.7;
-        } else if (refType === 'coin5') {
-            referenceDiameterCm = 2.5;
+        if (refType === 'coin2') {
+            referenceDiameterCm = 2.5; // Indian 2 Rupee Coin
+        } else if (refType === 'coin10') {
+            referenceDiameterCm = 2.7; // Indian 10 Rupee Coin
         } else {
             referenceDiameterCm = parseFloat(document.getElementById('refDiameter').value) || 2.5;
         }
@@ -684,17 +682,7 @@ async function processImageWithReference() {
             document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
             
             // Add to history if not in batch mode
-            if (!batchMode) {
-                addToHistory(actualArea, drapeCoefficient);
-            } else {
-                // Add to batch measurements
-                batchMeasurements.push({
-                    area: actualArea,
-                    drapeCoefficient: drapeCoefficient,
-                    timestamp: new Date()
-                });
-                updateBatchInfo();
-            }
+            addToHistory(actualArea, drapeCoefficient);
         }
         
         document.getElementById('status').textContent = 'Analysis complete';
@@ -716,8 +704,7 @@ async function processImageWithReference() {
         UIUtils.showLoading(false);
         isProcessing = false;
     }
-}
-
+    }
 // Display processed image with contours
 function displayProcessedImage(src, contours, drapeContour, refContour) {
     const processedCanvas = document.getElementById('processedCanvas');
