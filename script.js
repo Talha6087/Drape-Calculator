@@ -56,10 +56,11 @@ function initializeEventListeners() {
 }
 
 // -------------- Camera handling --------------
-
 async function startCamera() {
   const video = document.getElementById("video");
   const status = document.getElementById("status");
+  const container = document.querySelector(".camera-container");
+
   status.textContent = "Starting camera...";
 
   if (stream) {
@@ -79,18 +80,26 @@ async function startCamera() {
 
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = stream;
+
     video.onloadedmetadata = () => {
       video.play();
       streaming = true;
+
+      // keep container height proportional to video
+      const aspect = video.videoHeight / video.videoWidth || 9 / 16;
+      const widthPx = container.clientWidth;
+      container.style.height = widthPx * aspect + "px";
+
       document.getElementById("startCamera").disabled = true;
-      document.getElementById("capture").disabled = false;
+      document.getElementById("capture").disabled = true; // stays disabled until enough frames
       document.getElementById("reset").disabled = false;
       document.getElementById("uploadImage").disabled = true;
-      status.textContent = "Camera ready - Position phone above drape.";
+
+      status.textContent = "Camera ready - keep drape inside the dashed circle.";
     };
 
-    // make sure preview is not stretched
-    video.style.objectFit = "contain";
+    // fill container without black borders
+    video.style.objectFit = "cover";
   } catch (err) {
     console.error("Error accessing camera", err);
     status.textContent = "Error accessing camera: " + err.message;
