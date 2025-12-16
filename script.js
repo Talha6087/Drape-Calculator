@@ -97,21 +97,6 @@ async function startCamera() {
 
       status.textContent = "Camera ready - keep drape inside the dashed circle.";
     };
-video.onloadedmetadata = () => {
-  video.play();
-  streaming = true;
-
-  const container = document.querySelector(".camera-container");
-  const aspect = video.videoHeight / video.videoWidth || 4 / 3;
-  const widthPx = container.clientWidth;
-  container.style.height = widthPx * aspect + "px";   // square-ish on portrait phones
-
-  document.getElementById("startCamera").disabled = true;
-  document.getElementById("capture").disabled = false;
-  document.getElementById("reset").disabled = false;
-  document.getElementById("uploadImage").disabled = true;
-};
-
     // fill container without black borders
     video.style.objectFit = "cover";
   } catch (err) {
