@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Drape Area Calculator</title>
+    <link rel="stylesheet" href="style.css">
+    <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-ruler-combined"></i> Drape Area Calculator</h1>
+            <p class="subtitle">Department of Textile & Fiber Engineering</p>
+            <p class="subtitle">Measure fabric drape coefficient using image analysis</p>
+        </header>
+
+        <!-- Setup Instructions -->
+        <div class="card instructions">
+            <h2><i class="fas fa-info-circle"></i> How to Use</h2>
+            <ol>
+                <li>Position phone directly above drape tester</li>
+                <li>Place a reference coin next to drape for scale</li>
+                <li>Ensure good lighting and contrast</li>
+                <li>Click "Start Camera" or "Upload Image"</li>
+                <li>After capture, click on the reference coin</li>
+                <li>Enter drape tester diameters and click "Calculate Drape %"</li>
+            </ol>
+        </div>
+
+        <!-- Camera & Upload Section -->
+        <div class="card">
+            <h3><i class="fas fa-camera"></i> Capture Image</h3>
+            <div class="camera-container">
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+                <canvas id="outputCanvas" class="display-canvas" style="display:none;"></canvas>
+                
+                <!-- Level Indicator -->
+                <div class="level-indicator">
+                    <div class="level-bubble">
+                        <div class="bubble-center"></div>
+                    </div>
+                    <div class="level-text">Angle: <span id="levelStatus">0.0</span>°</div>
+                </div>
+                
+                <!-- Overlay -->
+                <div class="overlay">
+                    <div class="target-circle"></div>
+                    <div class="crosshair"></div>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button id="startCamera" class="btn btn-primary">
+                    <i class="fas fa-camera"></i> Start Camera
+                </button>
+                <button id="uploadImage" class="btn btn-info">
+                    <i class="fas fa-upload"></i> Upload Image
+                </button>
+                <button id="capture" class="btn btn-success" disabled>
+                    <i class="fas fa-camera-retro"></i> Capture
+                </button>
+                <button id="reset" class="btn btn-secondary" disabled>
+                    <i class="fas fa-redo"></i> Reset
+                </button>
+            </div>
+            
+            <!-- Hidden file input -->
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        </div>
+
+        <!-- Reference & Settings -->
+        <div class="card">
+            <h3><i class="fas fa-cog"></i> Settings</h3>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="refType">Reference Object:</label>
+                    <select id="refType" class="form-control">
+                        <option value="2.5">Indian 2 Rupee Coin (2.5 cm)</option>
+                        <option value="2.7">Indian 10 Rupee Coin (2.7 cm)</option>
+                        <option value="custom">Custom Size</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="customRefGroup" style="display:none;">
+                    <label for="refDiameter">Custom Diameter (cm):</label>
+                    <input type="number" id="refDiameter" class="form-control" step="0.1" min="0.5" value="2.5">
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="diskDiameter">Support Disk Diameter (cm):</label>
+                    <input type="number" id="diskDiameter" class="form-control" value="18.0" step="0.1" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="fabricDiameter">Fabric Diameter (cm):</label>
+                    <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1" min="1">
+                </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="card">
+            <h2><i class="fas fa-chart-bar"></i> Results</h2>
+            <div class="results-container">
+                <div class="result-item">
+                    <span class="label">Pixel Area:</span>
+                    <span id="pixelArea" class="value">--</span>
+                </div>
+                <div class="result-item">
+                    <span class="label">Actual Area (cm²):</span>
+                    <span id="actualArea" class="value">--</span>
+                </div>
+                <div class="result-item">
+                    <span class="label">Drape Coefficient:</span>
+                    <span id="drapeCoefficient" class="value">--</span>
+                </div>
+                <div class="result-item">
+                    <span class="label">Status:</span>
+                    <span id="status" class="value">Ready</span>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="calculateDrape" class="btn btn-info" disabled>
+                    <i class="fas fa-calculator"></i> Calculate Drape %
+                </button>
+            </div>
+            
+            <div class="image-comparison">
+                <div class="image-box">
+                    <h4>Captured Image</h4>
+                    <canvas id="originalCanvas" class="display-canvas"></canvas>
+                </div>
+                <div class="image-box">
+                    <h4>Processed</h4>
+                    <canvas id="processedCanvas" class="display-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- History -->
+        <div class="card">
+            <h3><i class="fas fa-history"></i> Measurement History</h3>
+            <table id="historyTable">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Area (cm²)</th>
+                        <th>Drape %</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <!-- History will be loaded here -->
+                </tbody>
+            </table>
+            <div style="margin-top: 15px;">
+                <button id="exportData" class="btn btn-outline">
+                    <i class="fas fa-download"></i> Export CSV
+                </button>
+                <button id="clearHistory" class="btn btn-small" style="margin-left: 10px;">
+                    <i class="fas fa-trash"></i> Clear History
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
