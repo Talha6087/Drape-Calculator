@@ -65,7 +65,7 @@ header h1 {
 .camera-container {
   position: relative;
   width: 100%;
-  max-width: 480px;       /* or whatever width you want */
+  max-width: 720px;       /* or whatever width you want */
   margin: 0 auto;
   overflow: hidden;
   border-radius: 16px;
