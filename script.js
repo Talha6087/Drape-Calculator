@@ -1,3 +1,5 @@
+[file name]: script.js
+[file content begin]
 // Main Application State
 const AppState = {
     video: null,
@@ -13,15 +15,9 @@ const AppState = {
     isProcessing: false,
     scaleFactor: null,
     
-    // Reference selection
-    referenceCircle: null,
-    referenceDiameterPixels: 0,
-    
-    // Cropping state
-    isCropping: false,
-    cropCircle: null,
-    cropCenter: { x: 0, y: 0 },
-    cropDiameterPixels: 0,
+    // Reference detection
+    detectedCoin: null,
+    coinCircleElement: null,
     
     // Zoom state
     zoomLevel: 1.0,
@@ -39,7 +35,6 @@ const AppState = {
     },
     
     // Measurement data
-    pixelArea: 0,
     drapeArea: 0,
     measurements: [],
     
@@ -69,7 +64,7 @@ function onOpenCvReady() {
     // Initialize event listeners
     initializeEventListeners();
     
-    updateStatus('Ready - Use camera or upload image');
+    updateStatus('Ready - Upload image or use camera');
 }
 
 // Set canvas sizes
@@ -89,30 +84,6 @@ function setCanvasSizes() {
     AppState.imageDisplayInfo.canvasHeight = height;
 }
 
-// Convert screen coordinates to image coordinates
-function screenToImageCoordinates(screenX, screenY) {
-    const info = AppState.imageDisplayInfo;
-    
-    // Adjust for zoom and pan
-    const zoom = AppState.zoomLevel;
-    const panX = AppState.panOffset.x;
-    const panY = AppState.panOffset.y;
-    
-    // Calculate scaled dimensions
-    const scaledWidth = info.imgWidth * info.scale * zoom;
-    const scaledHeight = info.imgHeight * info.scale * zoom;
-    
-    // Calculate offset with panning
-    const scaledOffsetX = info.offsetX + (info.canvasWidth - scaledWidth) / 2 + panX;
-    const scaledOffsetY = info.offsetY + (info.canvasHeight - scaledHeight) / 2 + panY;
-    
-    // Convert to image coordinates
-    const imgX = (screenX - scaledOffsetX) / (info.scale * zoom);
-    const imgY = (screenY - scaledOffsetY) / (info.scale * zoom);
-    
-    return { x: Math.round(imgX), y: Math.round(imgY) };
-}
-
 // Initialize all event listeners
 function initializeEventListeners() {
     // Camera controls
@@ -123,32 +94,35 @@ function initializeEventListeners() {
     document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
     document.getElementById('reset').addEventListener('click', resetApp);
     
-    // Capture and cropping
+    // Capture button
     document.getElementById('capture').addEventListener('click', captureImage);
-    document.getElementById('enableCrop').addEventListener('click', enableCropping);
-    document.getElementById('applyCrop').addEventListener('click', applyCrop);
-    document.getElementById('cancelCrop').addEventListener('click', cancelCrop);
     
     // Reference selection
     document.getElementById('refType').addEventListener('change', function() {
-        const diameters = {
-            'coin': 2.5,  // 1 Rupee
-            'coin2': 2.7, // 2 Rupee
-            'coin5': 2.5  // 5 Rupee
-        };
-        if (this.value !== 'custom') {
+        const customRefDiv = document.getElementById('customRef');
+        if (this.value === 'custom') {
+            customRefDiv.style.display = 'block';
+        } else {
+            customRefDiv.style.display = 'none';
+            const diameters = {
+                'coin': 2.5,  // 1 Rupee
+                'coin2': 2.7, // 2 Rupee
+                'coin5': 2.5  // 5 Rupee
+            };
             AppState.referenceDiameter = diameters[this.value] || 2.5;
             document.getElementById('refDiameter').value = AppState.referenceDiameter;
-            if (AppState.referenceCircle) {
+            if (AppState.detectedCoin) {
                 updateScaleFactor();
+                processDrapeArea();
             }
         }
     });
     
     document.getElementById('refDiameter').addEventListener('input', function() {
         AppState.referenceDiameter = parseFloat(this.value) || 2.5;
-        if (AppState.referenceCircle) {
+        if (AppState.detectedCoin) {
             updateScaleFactor();
+            processDrapeArea();
         }
     });
     
@@ -157,13 +131,17 @@ function initializeEventListeners() {
     // Drape tester settings
     document.getElementById('diskDiameter').addEventListener('input', function() {
         AppState.diskDiameter = parseFloat(this.value) || 18.0;
+        if (AppState.detectedCoin && AppState.drapeArea > 0) {
+            calculateDrapeCoefficient();
+        }
     });
     
     document.getElementById('fabricDiameter').addEventListener('input', function() {
         AppState.fabricDiameter = parseFloat(this.value) || 30.0;
+        if (AppState.detectedCoin && AppState.drapeArea > 0) {
+            calculateDrapeCoefficient();
+        }
     });
-    
-    document.getElementById('calculateDrape').addEventListener('click', calculateDrapeCoefficient);
     
     // Export and save
     document.getElementById('exportData').addEventListener('click', exportToCSV);
@@ -173,9 +151,6 @@ function initializeEventListeners() {
     document.getElementById('zoomIn').addEventListener('click', () => adjustZoom(1.2));
     document.getElementById('zoomOut').addEventListener('click', () => adjustZoom(0.8));
     document.getElementById('resetZoom').addEventListener('click', resetZoom);
-    
-    // Crop diameter change
-    document.getElementById('cropDiameter').addEventListener('input', updateCropCircleSize);
     
     // Canvas click for coin detection
     AppState.mainCanvas.addEventListener('click', handleCanvasClick);
@@ -217,12 +192,14 @@ async function handleImageUpload(event) {
         // Display image
         displayImageOnMainCanvas(AppState.capturedImage);
         
+        // Show output canvas
+        cv.imshow(AppState.outputCanvas, AppState.capturedImage);
+        
         // Enable controls
         document.getElementById('capture').disabled = false;
-        document.getElementById('enableCrop').disabled = false;
         document.getElementById('reset').disabled = false;
         
-        updateStatus('Image loaded. First, apply circular crop to isolate drape area.');
+        updateStatus('Image loaded. Click precisely on the coin in the image.');
         
         // Reset zoom and clear any previous reference
         resetZoom();
@@ -273,7 +250,7 @@ async function startCamera() {
         // Start video rendering
         requestAnimationFrame(renderVideo);
         
-        updateStatus('Camera active. Position drape and tap "Capture"');
+        updateStatus('Camera active. Position drape and coin, then click "Capture Image"');
         
     } catch (error) {
         console.error('Error accessing camera:', error);
@@ -404,24 +381,15 @@ function displayImageOnMainCanvas(mat) {
 
 // Handle canvas click for coin detection
 function handleCanvasClick(event) {
-    if (!AppState.capturedImage || AppState.isCropping) return;
+    if (!AppState.capturedImage || AppState.isProcessing) return;
     
     // Get click coordinates
     const rect = AppState.mainCanvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Convert to image coordinates
-    const imgCoords = screenToImageCoordinates(x, y);
-    
-    // Check if coordinates are within image bounds
-    if (imgCoords.x < 0 || imgCoords.x >= AppState.imageDisplayInfo.imgWidth ||
-        imgCoords.y < 0 || imgCoords.y >= AppState.imageDisplayInfo.imgHeight) {
-        return;
-    }
-    
     // Detect coin at clicked location
-    detectCoin(imgCoords.x, imgCoords.y);
+    detectCoin(x, y);
 }
 
 // Handle canvas touch for mobile
@@ -438,17 +406,105 @@ function handleCanvasTouch(event) {
     }
 }
 
-// Detect coin using Hough Circle Transform
-function detectCoin(clickX, clickY) {
+// Convert screen coordinates to image coordinates
+function screenToImageCoordinates(screenX, screenY) {
+    const info = AppState.imageDisplayInfo;
+    
+    // Adjust for zoom and pan
+    const zoom = AppState.zoomLevel;
+    const panX = AppState.panOffset.x;
+    const panY = AppState.panOffset.y;
+    
+    // Calculate scaled dimensions
+    const scaledWidth = info.imgWidth * info.scale * zoom;
+    const scaledHeight = info.imgHeight * info.scale * zoom;
+    
+    // Calculate offset with panning
+    const scaledOffsetX = info.offsetX + (info.canvasWidth - scaledWidth) / 2 + panX;
+    const scaledOffsetY = info.offsetY + (info.canvasHeight - scaledHeight) / 2 + panY;
+    
+    // Convert to image coordinates
+    const imgX = (screenX - scaledOffsetX) / (info.scale * zoom);
+    const imgY = (screenY - scaledOffsetY) / (info.scale * zoom);
+    
+    return { x: Math.round(imgX), y: Math.round(imgY) };
+}
+
+// Detect coin at clicked location
+function detectCoin(screenX, screenY) {
     if (!AppState.capturedImage || AppState.isProcessing) return;
     
     try {
         UIUtils.showLoading(true);
         updateStatus('Detecting coin...');
         
+        // Convert screen coordinates to image coordinates
+        const imgCoords = screenToImageCoordinates(screenX, screenY);
+        
+        // Validate coordinates are within image bounds
+        if (imgCoords.x < 0 || imgCoords.x >= AppState.imageDisplayInfo.imgWidth ||
+            imgCoords.y < 0 || imgCoords.y >= AppState.imageDisplayInfo.imgHeight) {
+            updateStatus('Click must be within the image area');
+            UIUtils.showLoading(false);
+            return;
+        }
+        
         // Create a copy of the image
         let src = AppState.capturedImage.clone();
         
+        // Method 1: Try Hough Circle Transform first (most accurate for coins)
+        let detectedCircle = detectCoinHough(src, imgCoords.x, imgCoords.y);
+        
+        // Method 2: If Hough fails, try contour detection
+        if (!detectedCircle) {
+            detectedCircle = detectCoinContour(src, imgCoords.x, imgCoords.y);
+        }
+        
+        if (detectedCircle) {
+            // Store detected coin
+            AppState.detectedCoin = detectedCircle;
+            
+            // Update detection status
+            document.getElementById('detectionStatus').textContent = 'Detected';
+            document.getElementById('detectionStatus').className = 'detected';
+            
+            // Update pixel diameter display
+            document.getElementById('pixelDistance').textContent = 
+                `${(detectedCircle.radius * 2).toFixed(1)} px`;
+            
+            // Calculate and update scale factor
+            updateScaleFactor();
+            
+            // Draw coin circle on image
+            drawCoinCircle();
+            
+            // Process drape area
+            processDrapeArea();
+            
+            // Enable clear reference button
+            document.getElementById('clearReference').disabled = false;
+            
+            updateStatus('Coin detected! Processing drape area...');
+        } else {
+            updateStatus('Could not detect coin. Click closer to coin center.');
+            UIUtils.showToast('Click closer to the center of the coin', 'error');
+        }
+        
+        // Clean up
+        src.delete();
+        
+    } catch (error) {
+        console.error('Coin detection error:', error);
+        updateStatus('Error detecting coin');
+        UIUtils.showToast('Error detecting coin', 'error');
+    } finally {
+        UIUtils.showLoading(false);
+    }
+}
+
+// Detect coin using Hough Circle Transform
+function detectCoinHough(src, clickX, clickY) {
+    try {
         // Convert to grayscale
         let gray = new cv.Mat();
         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
@@ -460,15 +516,15 @@ function detectCoin(clickX, clickY) {
         // Apply Hough Circle Transform
         let circles = new cv.Mat();
         cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 
-            1, // dp
-            20, // minDist
-            100, // param1
-            30, // param2
-            10, // minRadius (pixels)
-            50  // maxRadius (pixels)
+            1,      // dp
+            30,     // minDist (between circle centers)
+            100,    // param1 (canny edge threshold)
+            30,     // param2 (accumulator threshold)
+            15,     // minRadius (pixels) - minimum coin size
+            50      // maxRadius (pixels) - maximum coin size
         );
         
-        let detectedCircle = null;
+        let bestCircle = null;
         let minDistance = Infinity;
         
         // Find the circle closest to the click point
@@ -480,56 +536,28 @@ function detectCoin(clickX, clickY) {
             // Calculate distance from click point
             let distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
             
-            if (distance < minDistance && distance < radius * 2) {
+            // Accept circle if click is within or very close to it
+            if (distance < Math.max(radius, 30) && distance < minDistance) {
                 minDistance = distance;
-                detectedCircle = { x, y, radius };
+                bestCircle = { x, y, radius };
             }
         }
         
-        // If no circle detected, try alternative method using contour detection
-        if (!detectedCircle) {
-            detectedCircle = detectCoinByContour(src, clickX, clickY);
-        }
-        
-        if (detectedCircle) {
-            // Store reference circle
-            AppState.referenceCircle = detectedCircle;
-            AppState.referenceDiameterPixels = detectedCircle.radius * 2;
-            
-            // Update UI
-            document.getElementById('pixelDistance').textContent = 
-                `${AppState.referenceDiameterPixels.toFixed(1)} px`;
-            
-            // Calculate scale factor
-            updateScaleFactor();
-            
-            // Draw reference circle on image
-            drawReferenceCircle();
-            
-            // Process image for drape area
-            processDrapeArea();
-            
-            updateStatus('Coin detected. Processing drape area...');
-        } else {
-            updateStatus('No coin detected. Click closer to coin center.');
-        }
-        
         // Clean up
-        src.delete();
         gray.delete();
         blurred.delete();
         circles.delete();
         
+        return bestCircle;
+        
     } catch (error) {
-        console.error('Coin detection error:', error);
-        updateStatus('Error detecting coin');
-    } finally {
-        UIUtils.showLoading(false);
+        console.error('Hough detection error:', error);
+        return null;
     }
 }
 
-// Alternative coin detection using contours
-function detectCoinByContour(src, clickX, clickY) {
+// Detect coin using contour detection
+function detectCoinContour(src, clickX, clickY) {
     try {
         // Convert to grayscale
         let gray = new cv.Mat();
@@ -537,41 +565,49 @@ function detectCoinByContour(src, clickX, clickY) {
         
         // Apply binary threshold
         let binary = new cv.Mat();
-        cv.threshold(gray, binary, 100, 255, cv.THRESH_BINARY);
+        cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+        
+        // Apply morphological operations to clean up
+        let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+        let morph = new cv.Mat();
+        cv.morphologyEx(binary, morph, cv.MORPH_CLOSE, kernel);
         
         // Find contours
         let contours = new cv.MatVector();
         let hierarchy = new cv.Mat();
-        cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
-        let detectedCircle = null;
+        let bestCircle = null;
         let minDistance = Infinity;
         
         // Find contour closest to click point
         for (let i = 0; i < contours.size(); i++) {
             let contour = contours.get(i);
-            let moments = cv.moments(contour);
+            let area = cv.contourArea(contour);
             
-            if (moments.m00 > 0) {
-                let centerX = moments.m10 / moments.m00;
-                let centerY = moments.m01 / moments.m00;
+            // Filter by area (coin should be reasonable size)
+            if (area < 100 || area > 10000) continue;
+            
+            // Get bounding circle
+            let center = new cv.Point(0, 0);
+            let radius = 0;
+            cv.minEnclosingCircle(contour, center, radius);
+            
+            let x = Math.round(center.x);
+            let y = Math.round(center.y);
+            radius = Math.round(radius);
+            
+            // Calculate circularity
+            let perimeter = cv.arcLength(contour, true);
+            let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+            
+            // Accept if it's reasonably circular and close to click
+            if (circularity > 0.7) {
+                let distance = Math.sqrt(Math.pow(x - clickX, 2) + Math.pow(y - clickY, 2));
                 
-                // Calculate area and approximate radius
-                let area = cv.contourArea(contour);
-                let radius = Math.sqrt(area / Math.PI);
-                
-                // Check if radius is reasonable for a coin
-                if (radius >= 10 && radius <= 100) {
-                    let distance = Math.sqrt(Math.pow(centerX - clickX, 2) + Math.pow(centerY - clickY, 2));
-                    
-                    if (distance < minDistance && distance < radius * 2) {
-                        minDistance = distance;
-                        detectedCircle = {
-                            x: Math.round(centerX),
-                            y: Math.round(centerY),
-                            radius: Math.round(radius)
-                        };
-                    }
+                if (distance < Math.max(radius, 30) && distance < minDistance) {
+                    minDistance = distance;
+                    bestCircle = { x, y, radius };
                 }
             }
         }
@@ -579,10 +615,12 @@ function detectCoinByContour(src, clickX, clickY) {
         // Clean up
         gray.delete();
         binary.delete();
+        kernel.delete();
+        morph.delete();
         contours.delete();
         hierarchy.delete();
         
-        return detectedCircle;
+        return bestCircle;
         
     } catch (error) {
         console.error('Contour detection error:', error);
@@ -590,87 +628,99 @@ function detectCoinByContour(src, clickX, clickY) {
     }
 }
 
-// Draw reference circle on canvas
-function drawReferenceCircle() {
-    if (!AppState.referenceCircle) return;
+// Draw detected coin circle on canvas
+function drawCoinCircle() {
+    if (!AppState.detectedCoin || !AppState.coinCircleElement) return;
     
-    // Clear previous drawings
-    displayImageOnMainCanvas(AppState.capturedImage);
-    
-    const ctx = AppState.mainCtx;
-    const circle = AppState.referenceCircle;
-    
-    // Calculate screen coordinates
-    const screenX = circle.x * AppState.imageDisplayInfo.scale * AppState.zoomLevel + 
-                   AppState.imageDisplayInfo.offsetX + 
-                   (AppState.imageDisplayInfo.canvasWidth - 
-                    AppState.imageDisplayInfo.imgWidth * AppState.imageDisplayInfo.scale * AppState.zoomLevel) / 2 +
-                   AppState.panOffset.x;
-    
-    const screenY = circle.y * AppState.imageDisplayInfo.scale * AppState.zoomLevel + 
-                   AppState.imageDisplayInfo.offsetY + 
-                   (AppState.imageDisplayInfo.canvasHeight - 
-                    AppState.imageDisplayInfo.imgHeight * AppState.imageDisplayInfo.scale * AppState.zoomLevel) / 2 +
-                   AppState.panOffset.y;
-    
-    const screenRadius = circle.radius * AppState.imageDisplayInfo.scale * AppState.zoomLevel;
-    
-    // Draw circle
-    ctx.beginPath();
-    ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ff0000';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    // Draw center point
-    ctx.beginPath();
-    ctx.arc(screenX, screenY, 5, 0, Math.PI * 2);
-    ctx.fillStyle = '#ff0000';
-    ctx.fill();
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    // Draw measurement text
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 12px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`Diameter: ${AppState.referenceDiameterPixels.toFixed(1)} px`, screenX, screenY - screenRadius - 10);
-    ctx.fillText(`${AppState.referenceDiameter} cm`, screenX, screenY - screenRadius - 25);
-}
-
-// Update scale factor based on reference circle
-function updateScaleFactor() {
-    if (!AppState.referenceCircle) return;
-    
-    AppState.scaleFactor = AppState.referenceDiameterPixels / AppState.referenceDiameter;
-    document.getElementById('scaleFactor').textContent = AppState.scaleFactor.toFixed(2);
-}
-
-// Clear reference
-function clearReference() {
-    AppState.referenceCircle = null;
-    AppState.referenceDiameterPixels = 0;
-    AppState.scaleFactor = null;
-    
-    document.getElementById('pixelDistance').textContent = '--';
-    document.getElementById('scaleFactor').textContent = '--';
-    document.getElementById('pixelArea').textContent = '--';
-    document.getElementById('actualArea').textContent = '--';
-    document.getElementById('drapeCoefficient').textContent = '--';
-    
-    if (AppState.capturedImage) {
-        displayImageOnMainCanvas(AppState.capturedImage);
+    // Remove previous circle if exists
+    if (AppState.coinCircleElement) {
+        AppState.coinCircleElement.remove();
     }
     
-    updateStatus('Reference cleared. Click on coin to detect.');
+    const coin = AppState.detectedCoin;
+    const info = AppState.imageDisplayInfo;
+    
+    // Calculate screen coordinates
+    const screenX = coin.x * info.scale * AppState.zoomLevel + 
+                   info.offsetX + 
+                   (info.canvasWidth - info.imgWidth * info.scale * AppState.zoomLevel) / 2 +
+                   AppState.panOffset.x;
+    
+    const screenY = coin.y * info.scale * AppState.zoomLevel + 
+                   info.offsetY + 
+                   (info.canvasHeight - info.imgHeight * info.scale * AppState.zoomLevel) / 2 +
+                   AppState.panOffset.y;
+    
+    const screenRadius = coin.radius * info.scale * AppState.zoomLevel;
+    
+    // Create circle element
+    AppState.coinCircleElement = document.createElement('div');
+    AppState.coinCircleElement.className = 'coin-circle';
+    AppState.coinCircleElement.style.cssText = `
+        position: absolute;
+        left: ${screenX - screenRadius}px;
+        top: ${screenY - screenRadius}px;
+        width: ${screenRadius * 2}px;
+        height: ${screenRadius * 2}px;
+        border: 2px solid #e74c3c;
+        border-radius: 50%;
+        background: transparent;
+        pointer-events: none;
+        z-index: 5;
+        box-shadow: 0 0 10px rgba(231, 76, 60, 0.3);
+    `;
+    
+    // Add center point
+    const centerPoint = document.createElement('div');
+    centerPoint.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 10px;
+        height: 10px;
+        background: #e74c3c;
+        border-radius: 50%;
+        border: 2px solid white;
+    `;
+    AppState.coinCircleElement.appendChild(centerPoint);
+    
+    // Add measurement text
+    const textElement = document.createElement('div');
+    textElement.style.cssText = `
+        position: absolute;
+        top: -25px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(231, 76, 60, 0.9);
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        white-space: nowrap;
+    `;
+    textElement.textContent = `${(coin.radius * 2).toFixed(0)} px`;
+    AppState.coinCircleElement.appendChild(textElement);
+    
+    // Add to canvas container
+    AppState.mainCanvas.parentElement.appendChild(AppState.coinCircleElement);
+}
+
+// Update scale factor based on detected coin
+function updateScaleFactor() {
+    if (!AppState.detectedCoin) return;
+    
+    const pixelDiameter = AppState.detectedCoin.radius * 2;
+    AppState.scaleFactor = pixelDiameter / AppState.referenceDiameter;
+    
+    // Update UI
+    document.getElementById('scaleFactor').textContent = AppState.scaleFactor.toFixed(2);
 }
 
 // Process drape area
 function processDrapeArea() {
-    if (!AppState.capturedImage || AppState.isProcessing) return;
+    if (!AppState.capturedImage || !AppState.detectedCoin || AppState.isProcessing) return;
     
     AppState.isProcessing = true;
     updateStatus('Processing drape area...');
@@ -686,18 +736,19 @@ function processDrapeArea() {
             
             // Apply Gaussian blur
             let blurred = new cv.Mat();
-            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 2, 2);
             
-            // Apply threshold
+            // Apply adaptive thresholding for better drape detection
             let binary = new cv.Mat();
-            cv.threshold(blurred, binary, 50, 255, cv.THRESH_BINARY_INV);
+            cv.adaptiveThreshold(blurred, binary, 255,
+                cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
             
             // Find contours
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
             
-            // Find largest contour (drape area)
+            // Find the largest contour (drape area)
             let maxArea = 0;
             let maxContour = null;
             
@@ -705,41 +756,34 @@ function processDrapeArea() {
                 let contour = contours.get(i);
                 let area = cv.contourArea(contour);
                 
-                // Skip very small areas
-                if (area > maxArea && area > 1000) {
+                // Filter out very small areas and the coin area
+                if (area > maxArea && area > 5000) {
                     maxArea = area;
                     maxContour = contour;
                 }
             }
             
             if (maxContour) {
-                AppState.pixelArea = maxArea;
+                // Calculate drape area in cm²
+                const pixelArea = maxArea;
+                const actualAreaCm2 = pixelArea / (AppState.scaleFactor * AppState.scaleFactor);
+                AppState.drapeArea = actualAreaCm2;
                 
-                // Calculate actual area if scale is available
-                if (AppState.scaleFactor) {
-                    const actualAreaCm2 = AppState.pixelArea / (AppState.scaleFactor * AppState.scaleFactor);
-                    AppState.drapeArea = actualAreaCm2;
-                    
-                    // Update UI
-                    document.getElementById('pixelArea').textContent = AppState.pixelArea.toFixed(0);
-                    document.getElementById('actualArea').textContent = actualAreaCm2.toFixed(2);
-                    
-                    // Enable drape calculation
-                    document.getElementById('calculateDrape').disabled = false;
-                    document.getElementById('saveImage').disabled = false;
-                    
-                    updateStatus('Drape area calculated. Click "Calculate Drape %"');
-                    
-                    // Draw processed image
-                    drawProcessedImage(src, maxContour);
-                    
-                    // Auto-calculate drape if area is reasonable
-                    if (actualAreaCm2 > 50 && actualAreaCm2 < 1000) {
-                        setTimeout(calculateDrapeCoefficient, 500);
-                    }
-                }
+                // Update UI
+                document.getElementById('actualArea').textContent = actualAreaCm2.toFixed(2);
+                
+                // Draw processed image
+                drawProcessedImage(src, maxContour);
+                
+                // Calculate drape coefficient
+                calculateDrapeCoefficient();
+                
+                // Enable save button
+                document.getElementById('saveImage').disabled = false;
+                
+                updateStatus('Drape area processed successfully');
             } else {
-                updateStatus('No drape area found. Try adjusting crop or lighting.');
+                updateStatus('Could not detect drape area. Ensure good contrast.');
             }
             
             // Clean up
@@ -762,261 +806,65 @@ function processDrapeArea() {
 // Draw processed image with drape contour
 function drawProcessedImage(src, drapeContour) {
     try {
-        // Create processed image
-        let processed = new cv.Mat(src.rows, src.cols, cv.CV_8UC3, [255, 255, 255, 255]);
+        // Create processed image with original colors
+        let processed = src.clone();
         
-        // Draw drape contour
-        cv.drawContours(processed, [drapeContour], 0, [0, 255, 0, 255], 2);
+        // Create a mask for the drape area
+        let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+        cv.drawContours(mask, [drapeContour], 0, new cv.Scalar(255), -1);
         
-        // Fill drape area with transparency
-        let filled = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [255, 255, 255, 0]);
-        cv.drawContours(filled, [drapeContour], 0, [0, 255, 0, 100], -1);
+        // Create colored overlay
+        let overlay = new cv.Mat(src.rows, src.cols, cv.CV_8UC3, [0, 255, 0, 0]);
         
-        // Combine with original
-        cv.addWeighted(processed, 0.7, filled, 0.3, 0, processed);
+        // Apply overlay to drape area
+        overlay.copyTo(processed, mask);
+        
+        // Blend with original
+        cv.addWeighted(processed, 0.5, src, 0.5, 0, processed);
+        
+        // Draw contour outline
+        cv.drawContours(processed, [drapeContour], 0, [0, 200, 0, 255], 2);
         
         // Display processed image
         cv.imshow(AppState.processedCanvas, processed);
         
         // Clean up
+        mask.delete();
+        overlay.delete();
         processed.delete();
-        filled.delete();
         
     } catch (error) {
         console.error('Error drawing processed image:', error);
     }
 }
 
-// Enable circular cropping
-function enableCropping() {
-    if (!AppState.capturedImage) return;
-    
-    AppState.isCropping = true;
-    
-    // Show crop controls
-    document.getElementById('cropControls').style.display = 'block';
-    document.getElementById('enableCrop').disabled = true;
-    document.getElementById('capture').disabled = true;
-    
-    // Create crop circle at center
-    const canvasRect = AppState.mainCanvas.getBoundingClientRect();
-    const centerX = canvasRect.width / 2;
-    const centerY = canvasRect.height / 2;
-    
-    // Calculate crop diameter
-    const cropDiameterCm = parseFloat(document.getElementById('cropDiameter').value) || 30.0;
-    let diameterPixels = 300; // Default
-    
-    // If we already have scale, use it
-    if (AppState.scaleFactor) {
-        diameterPixels = cropDiameterCm * AppState.scaleFactor;
-        diameterPixels *= AppState.imageDisplayInfo.scale;
+// Calculate Drape Coefficient
+function calculateDrapeCoefficient() {
+    if (!AppState.drapeArea || !AppState.scaleFactor) {
+        updateStatus('Need coin reference and drape area first');
+        return;
     }
     
-    // Ensure diameter fits within canvas
-    diameterPixels = Math.min(diameterPixels, Math.min(canvasRect.width, canvasRect.height) * 0.9);
-    
-    AppState.cropDiameterPixels = diameterPixels;
-    AppState.cropCenter = { x: centerX, y: centerY };
-    
-    // Create and display crop circle
-    if (AppState.cropCircle) {
-        AppState.cropCircle.remove();
-    }
-    
-    AppState.cropCircle = UIUtils.createCropCircle(
-        AppState.mainCanvas,
-        centerX,
-        centerY,
-        diameterPixels
+    // Calculate drape coefficient
+    const drapeCoefficient = DrapeFormulas.drapeCoefficient(
+        AppState.drapeArea,
+        AppState.diskDiameter,
+        AppState.fabricDiameter
     );
     
-    // Make crop circle draggable
-    makeCropCircleDraggable();
+    // Get fabric properties
+    const fabricProps = DrapeFormulas.fabricProperties(drapeCoefficient);
     
-    updateStatus('Drag circle to position drape. Adjust diameter if needed, then Apply Crop.');
-}
-
-// Make crop circle draggable
-function makeCropCircleDraggable() {
-    if (!AppState.cropCircle) return;
+    // Update UI
+    document.getElementById('drapeCoefficient').textContent = `${drapeCoefficient.toFixed(2)}%`;
+    document.getElementById('fabricProperty').textContent = fabricProps;
     
-    let isDragging = false;
-    let startX, startY;
-    let startLeft, startTop;
+    // Add to history
+    addToHistory(AppState.drapeArea, drapeCoefficient, fabricProps);
     
-    AppState.cropCircle.addEventListener('mousedown', startDrag);
-    AppState.cropCircle.addEventListener('touchstart', startDragTouch);
+    updateStatus(`Drape: ${drapeCoefficient.toFixed(2)}% - ${fabricProps}`);
     
-    function startDrag(e) {
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        startLeft = parseInt(AppState.cropCircle.style.left);
-        startTop = parseInt(AppState.cropCircle.style.top);
-        
-        document.addEventListener('mousemove', drag);
-        document.addEventListener('mouseup', stopDrag);
-        e.preventDefault();
-    }
-    
-    function startDragTouch(e) {
-        if (e.touches.length === 1) {
-            isDragging = true;
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            startLeft = parseInt(AppState.cropCircle.style.left);
-            startTop = parseInt(AppState.cropCircle.style.top);
-            
-            document.addEventListener('touchmove', dragTouch);
-            document.addEventListener('touchend', stopDrag);
-            e.preventDefault();
-        }
-    }
-    
-    function drag(e) {
-        if (!isDragging) return;
-        
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        
-        AppState.cropCircle.style.left = `${startLeft + dx}px`;
-        AppState.cropCircle.style.top = `${startTop + dy}px`;
-    }
-    
-    function dragTouch(e) {
-        if (!isDragging || e.touches.length !== 1) return;
-        
-        const dx = e.touches[0].clientX - startX;
-        const dy = e.touches[0].clientY - startY;
-        
-        AppState.cropCircle.style.left = `${startLeft + dx}px`;
-        AppState.cropCircle.style.top = `${startTop + dy}px`;
-    }
-    
-    function stopDrag() {
-        isDragging = false;
-        document.removeEventListener('mousemove', drag);
-        document.removeEventListener('touchmove', dragTouch);
-        document.removeEventListener('mouseup', stopDrag);
-        document.removeEventListener('touchend', stopDrag);
-    }
-}
-
-// Update crop circle size
-function updateCropCircleSize() {
-    if (!AppState.isCropping || !AppState.cropCircle) return;
-    
-    const cropDiameterCm = parseFloat(document.getElementById('cropDiameter').value) || 30.0;
-    
-    // Calculate diameter in pixels
-    let diameterPixels = 300; // Default
-    
-    if (AppState.scaleFactor) {
-        diameterPixels = cropDiameterCm * AppState.scaleFactor;
-        diameterPixels *= AppState.imageDisplayInfo.scale;
-    }
-    
-    // Ensure diameter fits within canvas
-    const canvasRect = AppState.mainCanvas.getBoundingClientRect();
-    diameterPixels = Math.min(diameterPixels, Math.min(canvasRect.width, canvasRect.height) * 0.9);
-    
-    // Update crop circle
-    const currentLeft = parseInt(AppState.cropCircle.style.left);
-    const currentTop = parseInt(AppState.cropCircle.style.top);
-    const currentCenterX = currentLeft + AppState.cropDiameterPixels / 2;
-    const currentCenterY = currentTop + AppState.cropDiameterPixels / 2;
-    
-    AppState.cropDiameterPixels = diameterPixels;
-    AppState.cropCircle.style.width = `${diameterPixels}px`;
-    AppState.cropCircle.style.height = `${diameterPixels}px`;
-    AppState.cropCircle.style.left = `${currentCenterX - diameterPixels/2}px`;
-    AppState.cropCircle.style.top = `${currentCenterY - diameterPixels/2}px`;
-}
-
-// Apply circular crop
-function applyCrop() {
-    if (!AppState.capturedImage || !AppState.cropCircle || !AppState.isCropping) return;
-    
-    try {
-        UIUtils.showLoading(true);
-        updateStatus('Applying crop...');
-        
-        // Get crop parameters
-        const canvasRect = AppState.mainCanvas.getBoundingClientRect();
-        const circleRect = AppState.cropCircle.getBoundingClientRect();
-        
-        // Calculate center in screen coordinates
-        const centerX = circleRect.left - canvasRect.left + circleRect.width / 2;
-        const centerY = circleRect.top - canvasRect.top + circleRect.height / 2;
-        
-        // Convert screen coordinates to image coordinates
-        const imgCenter = screenToImageCoordinates(centerX, centerY);
-        
-        // Calculate diameter in image pixels
-        let diameterImagePixels = AppState.cropDiameterPixels / (AppState.imageDisplayInfo.scale * AppState.zoomLevel);
-        
-        // Ensure coordinates are within image bounds
-        const clampedCenterX = Math.max(0, Math.min(AppState.capturedImage.cols, imgCenter.x));
-        const clampedCenterY = Math.max(0, Math.min(AppState.capturedImage.rows, imgCenter.y));
-        diameterImagePixels = Math.min(
-            diameterImagePixels,
-            Math.min(clampedCenterX, AppState.capturedImage.cols - clampedCenterX) * 2,
-            Math.min(clampedCenterY, AppState.capturedImage.rows - clampedCenterY) * 2
-        );
-        
-        // Apply circular crop
-        const croppedImage = ImageUtils.applyCircularCrop(
-            AppState.capturedImage,
-            clampedCenterX,
-            clampedCenterY,
-            diameterImagePixels
-        );
-        
-        // Update captured image
-        AppState.capturedImage.delete();
-        AppState.capturedImage = croppedImage;
-        
-        // Update image dimensions
-        AppState.imageDisplayInfo.imgWidth = croppedImage.cols;
-        AppState.imageDisplayInfo.imgHeight = croppedImage.rows;
-        
-        // Clear previous reference (since coordinates changed)
-        clearReference();
-        
-        // Display cropped image
-        displayImageOnMainCanvas(AppState.capturedImage);
-        cv.imshow(AppState.outputCanvas, AppState.capturedImage);
-        
-        // Clean up cropping
-        cancelCrop();
-        
-        updateStatus('Crop applied. Now click on the coin in the image to set reference.');
-        
-    } catch (error) {
-        console.error('Error applying crop:', error);
-        updateStatus('Error applying crop');
-    } finally {
-        UIUtils.showLoading(false);
-    }
-}
-
-// Cancel cropping
-function cancelCrop() {
-    AppState.isCropping = false;
-    
-    // Hide crop controls
-    document.getElementById('cropControls').style.display = 'none';
-    document.getElementById('enableCrop').disabled = false;
-    document.getElementById('capture').disabled = false;
-    
-    // Remove crop circle
-    if (AppState.cropCircle) {
-        AppState.cropCircle.remove();
-        AppState.cropCircle = null;
-    }
-    
-    updateStatus('Cropping cancelled');
+    return drapeCoefficient;
 }
 
 // Capture Image Function
@@ -1048,14 +896,44 @@ function captureImage() {
         // Show output canvas
         cv.imshow(AppState.outputCanvas, AppState.capturedImage);
         
-        // Enable crop button
-        document.getElementById('enableCrop').disabled = false;
-        
-        updateStatus('Image captured. First, apply circular crop to isolate drape area.');
+        updateStatus('Image captured. Click precisely on the coin in the image.');
         
         // Clear any previous reference
         clearReference();
     }
+}
+
+// Clear reference
+function clearReference() {
+    // Remove coin circle
+    if (AppState.coinCircleElement) {
+        AppState.coinCircleElement.remove();
+        AppState.coinCircleElement = null;
+    }
+    
+    // Reset state
+    AppState.detectedCoin = null;
+    AppState.scaleFactor = null;
+    AppState.drapeArea = 0;
+    
+    // Reset UI
+    document.getElementById('detectionStatus').textContent = 'Not detected';
+    document.getElementById('detectionStatus').className = '';
+    document.getElementById('pixelDistance').textContent = '--';
+    document.getElementById('scaleFactor').textContent = '--';
+    document.getElementById('actualArea').textContent = '--';
+    document.getElementById('drapeCoefficient').textContent = '--';
+    document.getElementById('fabricProperty').textContent = '--';
+    
+    document.getElementById('clearReference').disabled = true;
+    document.getElementById('saveImage').disabled = true;
+    
+    // Clear processed canvas
+    AppState.processedCtx.clearRect(0, 0, 
+        AppState.processedCanvas.width, 
+        AppState.processedCanvas.height);
+    
+    updateStatus('Reference cleared. Click on coin to detect.');
 }
 
 // Zoom functions
@@ -1068,8 +946,8 @@ function adjustZoom(factor) {
         // Will be updated in next renderVideo frame
     } else if (AppState.capturedImage) {
         displayImageOnMainCanvas(AppState.capturedImage);
-        if (AppState.referenceCircle) {
-            drawReferenceCircle();
+        if (AppState.detectedCoin) {
+            drawCoinCircle();
         }
     }
 }
@@ -1082,43 +960,10 @@ function resetZoom() {
         // Will be updated in next renderVideo frame
     } else if (AppState.capturedImage) {
         displayImageOnMainCanvas(AppState.capturedImage);
-        if (AppState.referenceCircle) {
-            drawReferenceCircle();
+        if (AppState.detectedCoin) {
+            drawCoinCircle();
         }
     }
-}
-
-// Calculate Drape Coefficient
-function calculateDrapeCoefficient() {
-    if (!AppState.drapeArea || !AppState.scaleFactor) {
-        updateStatus('Need reference and drape area first');
-        return;
-    }
-    
-    // Get drape tester dimensions
-    const diskArea = DrapeFormulas.circleArea(AppState.diskDiameter);
-    const fabricArea = DrapeFormulas.circleArea(AppState.fabricDiameter);
-    
-    // Calculate drape coefficient
-    const drapeCoefficient = DrapeFormulas.drapeCoefficient(
-        AppState.drapeArea,
-        AppState.diskDiameter,
-        AppState.fabricDiameter
-    );
-    
-    // Get fabric properties
-    const fabricProps = DrapeFormulas.fabricProperties(drapeCoefficient);
-    
-    // Update UI
-    document.getElementById('drapeCoefficient').textContent = 
-        `${drapeCoefficient.toFixed(2)}% (${fabricProps})`;
-    
-    // Add to history
-    addToHistory(AppState.drapeArea, drapeCoefficient);
-    
-    updateStatus(`Drape coefficient: ${drapeCoefficient.toFixed(2)}% - ${fabricProps}`);
-    
-    return drapeCoefficient;
 }
 
 // Helper Functions
@@ -1163,29 +1008,19 @@ function resetApp() {
     
     // Reset state
     clearReference();
-    cancelCrop();
     
-    AppState.pixelArea = 0;
-    AppState.drapeArea = 0;
     AppState.zoomLevel = 1.0;
     AppState.panOffset = { x: 0, y: 0 };
     
     // Reset UI
-    document.getElementById('pixelArea').textContent = '--';
-    document.getElementById('actualArea').textContent = '--';
-    document.getElementById('drapeCoefficient').textContent = '--';
-    document.getElementById('pixelDistance').textContent = '--';
-    document.getElementById('scaleFactor').textContent = '--';
-    
     document.getElementById('capture').disabled = true;
-    document.getElementById('enableCrop').disabled = true;
     document.getElementById('calculateDrape').disabled = true;
     document.getElementById('saveImage').disabled = true;
     
     updateStatus('App reset. Ready to start again.');
 }
 
-function addToHistory(area, coefficient) {
+function addToHistory(area, coefficient, property) {
     const historyBody = document.getElementById('historyBody');
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1195,6 +1030,7 @@ function addToHistory(area, coefficient) {
         <td>${timeStr}</td>
         <td>${area.toFixed(2)} cm²</td>
         <td>${coefficient.toFixed(2)}%</td>
+        <td>${property}</td>
         <td>
             <button class="btn-small" onclick="deleteRow(this)">Delete</button>
         </td>
@@ -1206,7 +1042,8 @@ function addToHistory(area, coefficient) {
     AppState.measurements.push({
         time: now,
         area: area,
-        coefficient: coefficient
+        coefficient: coefficient,
+        property: property
     });
 }
 
@@ -1229,11 +1066,11 @@ function exportToCSV() {
     }
     
     // Create CSV content
-    let csv = 'Time,Area (cm²),Drape Coefficient (%)\n';
+    let csv = 'Time,Area (cm²),Drape Coefficient (%),Fabric Property\n';
     
     AppState.measurements.forEach(m => {
         const timeStr = m.time.toLocaleString();
-        csv += `"${timeStr}",${m.area.toFixed(2)},${m.coefficient.toFixed(2)}\n`;
+        csv += `"${timeStr}",${m.area.toFixed(2)},${m.coefficient.toFixed(2)},${m.property}\n`;
     });
     
     // Create download link
@@ -1261,42 +1098,71 @@ function saveResultImage() {
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
     
-    // Draw original/cropped image
-    const outputImgData = AppState.outputCtx.getImageData(0, 0, 400, 400);
-    ctx.putImageData(outputImgData, 0, 0);
+    // Draw original image with coin circle
+    const originalImg = new Image();
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = AppState.capturedImage.cols;
+    tempCanvas.height = AppState.capturedImage.rows;
+    const tempCtx = tempCanvas.getContext('2d');
+    const imgData = new ImageData(
+        new Uint8ClampedArray(AppState.capturedImage.data),
+        AppState.capturedImage.cols,
+        AppState.capturedImage.rows
+    );
+    tempCtx.putImageData(imgData, 0, 0);
     
-    // Draw processed image
-    const processedImgData = AppState.processedCtx.getImageData(0, 0, 400, 400);
-    ctx.putImageData(processedImgData, 400, 0);
+    // Draw coin circle on original
+    if (AppState.detectedCoin) {
+        tempCtx.beginPath();
+        tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
+                   AppState.detectedCoin.radius, 0, Math.PI * 2);
+        tempCtx.strokeStyle = '#e74c3c';
+        tempCtx.lineWidth = 3;
+        tempCtx.stroke();
+        
+        tempCtx.beginPath();
+        tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
+                   5, 0, Math.PI * 2);
+        tempCtx.fillStyle = '#e74c3c';
+        tempCtx.fill();
+    }
     
-    // Add labels
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(0, 0, 800, 30);
-    ctx.fillRect(0, 370, 800, 30);
-    
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('Original / Cropped', 200, 20);
-    ctx.fillText('Processed Result', 600, 20);
-    
-    // Add measurements
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Area: ${AppState.drapeArea ? AppState.drapeArea.toFixed(2) : '--'} cm²`, 10, 385);
-    ctx.fillText(`Drape: ${document.getElementById('drapeCoefficient').textContent}`, 410, 385);
-    
-    // Add timestamp
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#666';
-    ctx.font = '10px Arial';
-    const now = new Date();
-    ctx.fillText(now.toLocaleString(), 790, 390);
-    
-    // Save image
-    FileUtils.saveImage(combinedCanvas, `drape-measurement-${now.getTime()}.png`);
-    
-    updateStatus('Result image saved');
+    originalImg.src = tempCanvas.toDataURL();
+    originalImg.onload = () => {
+        ctx.drawImage(originalImg, 0, 0, 400, 400);
+        
+        // Draw processed image
+        ctx.drawImage(AppState.processedCanvas, 400, 0, 400, 400);
+        
+        // Add labels and measurements
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, 800, 30);
+        ctx.fillRect(0, 370, 800, 30);
+        
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Original with Coin', 200, 20);
+        ctx.fillText('Drape Area Detected', 600, 20);
+        
+        // Add measurements
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Area: ${AppState.drapeArea.toFixed(2)} cm²`, 10, 385);
+        ctx.fillText(`Drape: ${document.getElementById('drapeCoefficient').textContent}`, 410, 385);
+        
+        // Add timestamp
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#666';
+        ctx.font = '10px Arial';
+        const now = new Date();
+        ctx.fillText(now.toLocaleString(), 790, 390);
+        
+        // Save image
+        FileUtils.saveImage(combinedCanvas, `drape-measurement-${now.getTime()}.png`);
+        
+        updateStatus('Result image saved');
+    };
 }
 
 // Initialize app when DOM is loaded
@@ -1308,3 +1174,4 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStatus('Loading OpenCV...');
     }
 });
+[file content end]
