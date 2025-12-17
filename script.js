@@ -1,3 +1,4 @@
+// Main Application State
 const AppState = {
     video: null,
     mainCanvas: null,
@@ -16,7 +17,10 @@ const AppState = {
     referenceLine: {
         start: null,
         end: null,
-        isDrawing: false
+        isDrawing: false,
+        current: null,
+        screenStart: null,
+        screenEnd: null
     },
     
     // Cropping state
@@ -30,6 +34,17 @@ const AppState = {
     panOffset: { x: 0, y: 0 },
     isPanning: false,
     panStart: { x: 0, y: 0 },
+    
+    // Image display info
+    imageDisplayInfo: {
+        offsetX: 0,
+        offsetY: 0,
+        scale: 1,
+        imgWidth: 0,
+        imgHeight: 0,
+        canvasWidth: 0,
+        canvasHeight: 0
+    },
     
     // Measurement data
     pixelArea: 0,
@@ -77,6 +92,57 @@ function setCanvasSizes() {
     AppState.outputCanvas.height = 400;
     AppState.processedCanvas.width = 400;
     AppState.processedCanvas.height = 400;
+    
+    AppState.imageDisplayInfo.canvasWidth = width;
+    AppState.imageDisplayInfo.canvasHeight = height;
+}
+
+// Convert screen coordinates to image coordinates
+function screenToImageCoordinates(screenX, screenY) {
+    const info = AppState.imageDisplayInfo;
+    
+    // Adjust for zoom and pan
+    const zoom = AppState.zoomLevel;
+    const panX = AppState.panOffset.x;
+    const panY = AppState.panOffset.y;
+    
+    // Calculate scaled dimensions
+    const scaledWidth = info.imgWidth * info.scale * zoom;
+    const scaledHeight = info.imgHeight * info.scale * zoom;
+    
+    // Calculate offset with panning
+    const scaledOffsetX = info.offsetX + (info.canvasWidth - scaledWidth) / 2 + panX;
+    const scaledOffsetY = info.offsetY + (info.canvasHeight - scaledHeight) / 2 + panY;
+    
+    // Convert to image coordinates
+    const imgX = (screenX - scaledOffsetX) / (info.scale * zoom);
+    const imgY = (screenY - scaledOffsetY) / (info.scale * zoom);
+    
+    return { x: imgX, y: imgY };
+}
+
+// Convert image coordinates to screen coordinates
+function imageToScreenCoordinates(imgX, imgY) {
+    const info = AppState.imageDisplayInfo;
+    
+    // Adjust for zoom and pan
+    const zoom = AppState.zoomLevel;
+    const panX = AppState.panOffset.x;
+    const panY = AppState.panOffset.y;
+    
+    // Calculate scaled dimensions
+    const scaledWidth = info.imgWidth * info.scale * zoom;
+    const scaledHeight = info.imgHeight * info.scale * zoom;
+    
+    // Calculate offset with panning
+    const scaledOffsetX = info.offsetX + (info.canvasWidth - scaledWidth) / 2 + panX;
+    const scaledOffsetY = info.offsetY + (info.canvasHeight - scaledHeight) / 2 + panY;
+    
+    // Convert to screen coordinates
+    const screenX = scaledOffsetX + imgX * info.scale * zoom;
+    const screenY = scaledOffsetY + imgY * info.scale * zoom;
+    
+    return { x: screenX, y: screenY };
 }
 
 // Initialize all event listeners
@@ -105,6 +171,9 @@ function initializeEventListeners() {
         if (this.value !== 'custom') {
             AppState.referenceDiameter = diameters[this.value] || 2.5;
             document.getElementById('refDiameter').value = AppState.referenceDiameter;
+            if (AppState.referenceLine.start && AppState.referenceLine.end) {
+                updateScaleFactor();
+            }
         }
     });
     
@@ -137,15 +206,21 @@ function initializeEventListeners() {
     document.getElementById('zoomOut').addEventListener('click', () => adjustZoom(0.8));
     document.getElementById('resetZoom').addEventListener('click', resetZoom);
     
+    // Crop diameter change
+    document.getElementById('cropDiameter').addEventListener('input', updateCropCircleSize);
+    
     // Canvas mouse events for reference line drawing
     AppState.mainCanvas.addEventListener('mousedown', handleCanvasMouseDown);
     AppState.mainCanvas.addEventListener('mousemove', handleCanvasMouseMove);
     AppState.mainCanvas.addEventListener('mouseup', handleCanvasMouseUp);
     
+    // Prevent context menu on canvas
+    AppState.mainCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    
     // Touch events for mobile
-    AppState.mainCanvas.addEventListener('touchstart', handleCanvasTouchStart);
-    AppState.mainCanvas.addEventListener('touchmove', handleCanvasTouchMove);
-    AppState.mainCanvas.addEventListener('touchend', handleCanvasTouchEnd);
+    AppState.mainCanvas.addEventListener('touchstart', handleCanvasTouchStart, { passive: false });
+    AppState.mainCanvas.addEventListener('touchmove', handleCanvasTouchMove, { passive: false });
+    AppState.mainCanvas.addEventListener('touchend', handleCanvasTouchEnd, { passive: false });
     
     // Window resize
     window.addEventListener('resize', setCanvasSizes);
@@ -174,6 +249,10 @@ async function handleImageUpload(event) {
         AppState.originalImage = cv.matFromImageData(imageData);
         AppState.capturedImage = AppState.originalImage.clone();
         
+        // Store image dimensions
+        AppState.imageDisplayInfo.imgWidth = img.width;
+        AppState.imageDisplayInfo.imgHeight = img.height;
+        
         // Display image
         displayImageOnMainCanvas(AppState.capturedImage);
         
@@ -182,10 +261,11 @@ async function handleImageUpload(event) {
         document.getElementById('enableCrop').disabled = false;
         document.getElementById('reset').disabled = false;
         
-        updateStatus('Image loaded. Draw reference line across coin.');
+        updateStatus('Image loaded. Draw reference line across coin diameter.');
         
-        // Reset zoom
+        // Reset zoom and clear any previous reference
         resetZoom();
+        clearReferenceLine();
         
     } catch (error) {
         console.error('Error loading image:', error);
@@ -223,6 +303,12 @@ async function startCamera() {
         document.getElementById('capture').disabled = false;
         document.getElementById('reset').disabled = false;
         
+        // Wait for video dimensions
+        AppState.video.onloadedmetadata = () => {
+            AppState.imageDisplayInfo.imgWidth = AppState.video.videoWidth;
+            AppState.imageDisplayInfo.imgHeight = AppState.video.videoHeight;
+        };
+        
         // Start video rendering
         requestAnimationFrame(renderVideo);
         
@@ -241,185 +327,180 @@ async function startCamera() {
 function renderVideo() {
     if (!AppState.isCameraActive) return;
     
-    AppState.mainCtx.save();
-    
-    // Clear canvas
-    AppState.mainCtx.clearRect(0, 0, AppState.mainCanvas.width, AppState.mainCanvas.height);
-    
-    // Calculate dimensions to maintain aspect ratio
-    const video = AppState.video;
     const canvas = AppState.mainCanvas;
+    const ctx = AppState.mainCtx;
+    const video = AppState.video;
     
-    const videoAspect = video.videoWidth / video.videoHeight;
+    if (!video.videoWidth || !video.videoHeight) {
+        requestAnimationFrame(renderVideo);
+        return;
+    }
+    
+    // Calculate display dimensions maintaining aspect ratio
     const canvasAspect = canvas.width / canvas.height;
+    const videoAspect = video.videoWidth / video.videoHeight;
     
-    let renderWidth, renderHeight, offsetX, offsetY;
+    let drawWidth, drawHeight, offsetX, offsetY;
     
     if (videoAspect > canvasAspect) {
-        renderHeight = canvas.height;
-        renderWidth = videoAspect * renderHeight;
-        offsetX = (canvas.width - renderWidth) / 2;
+        // Video is wider than canvas
+        drawHeight = canvas.height;
+        drawWidth = drawHeight * videoAspect;
+        offsetX = (canvas.width - drawWidth) / 2;
         offsetY = 0;
     } else {
-        renderWidth = canvas.width;
-        renderHeight = renderWidth / videoAspect;
+        // Video is taller than canvas
+        drawWidth = canvas.width;
+        drawHeight = drawWidth / videoAspect;
         offsetX = 0;
-        offsetY = (canvas.height - renderHeight) / 2;
+        offsetY = (canvas.height - drawHeight) / 2;
     }
+    
+    // Update display info
+    AppState.imageDisplayInfo.offsetX = offsetX;
+    AppState.imageDisplayInfo.offsetY = offsetY;
+    AppState.imageDisplayInfo.scale = drawWidth / video.videoWidth;
     
     // Apply zoom and pan
     const zoom = AppState.zoomLevel;
     const panX = AppState.panOffset.x;
     const panY = AppState.panOffset.y;
     
-    const scaledWidth = renderWidth * zoom;
-    const scaledHeight = renderHeight * zoom;
-    const scaledOffsetX = offsetX + (renderWidth - scaledWidth) / 2 + panX;
-    const scaledOffsetY = offsetY + (renderHeight - scaledHeight) / 2 + panY;
+    const scaledWidth = drawWidth * zoom;
+    const scaledHeight = drawHeight * zoom;
+    const scaledOffsetX = offsetX + (drawWidth - scaledWidth) / 2 + panX;
+    const scaledOffsetY = offsetY + (drawHeight - scaledHeight) / 2 + panY;
     
-    AppState.mainCtx.drawImage(
-        video,
-        scaledOffsetX, scaledOffsetY,
-        scaledWidth, scaledHeight
-    );
+    // Clear and draw
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, scaledOffsetX, scaledOffsetY, scaledWidth, scaledHeight);
     
-    // Draw reference line if drawing
-    if (AppState.referenceLine.isDrawing && AppState.referenceLine.start) {
-        const start = AppState.referenceLine.start;
-        const current = AppState.referenceLine.current;
-        
-        if (start && current) {
-            const pixelDist = ImageUtils.distance(start.x, start.y, current.x, current.y);
-            ImageUtils.drawReferenceLine(AppState.mainCtx, start.x, start.y, current.x, current.y, pixelDist);
-        }
-    }
-    
-    // Draw existing reference line
-    if (AppState.referenceLine.start && AppState.referenceLine.end) {
-        const pixelDist = ImageUtils.distance(
-            AppState.referenceLine.start.x, AppState.referenceLine.start.y,
-            AppState.referenceLine.end.x, AppState.referenceLine.end.y
-        );
-        ImageUtils.drawReferenceLine(
-            AppState.mainCtx,
-            AppState.referenceLine.start.x, AppState.referenceLine.start.y,
-            AppState.referenceLine.end.x, AppState.referenceLine.end.y,
-            pixelDist,
-            AppState.scaleFactor
-        );
-    }
-    
-    AppState.mainCtx.restore();
+    // Draw reference line if exists
+    drawReferenceLineOnCanvas();
     
     requestAnimationFrame(renderVideo);
 }
 
-// Capture Image Function
-function captureImage() {
-    if (AppState.isCameraActive) {
-        // Capture from video
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = AppState.video.videoWidth;
-        tempCanvas.height = AppState.video.videoHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(AppState.video, 0, 0);
-        
-        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-        AppState.originalImage = cv.matFromImageData(imageData);
-        AppState.capturedImage = AppState.originalImage.clone();
-        
-        // Stop camera
-        stopCamera();
-    }
-    
-    // Process and display
-    if (AppState.capturedImage) {
-        displayImageOnMainCanvas(AppState.capturedImage);
-        updateStatus('Image captured. Draw reference line or enable cropping.');
-        
-        // Show output canvas
-        cv.imshow(AppState.outputCanvas, AppState.capturedImage);
-        
-        // Enable crop button
-        document.getElementById('enableCrop').disabled = false;
-    }
-}
-
-// Display image on main canvas with zoom/pan
+// Display image on main canvas
 function displayImageOnMainCanvas(mat) {
     if (!mat || mat.empty()) return;
     
-    AppState.mainCtx.save();
-    AppState.mainCtx.clearRect(0, 0, AppState.mainCanvas.width, AppState.mainCanvas.height);
+    const canvas = AppState.mainCanvas;
+    const ctx = AppState.mainCtx;
     
-    // Calculate dimensions to maintain aspect ratio
+    // Calculate display dimensions maintaining aspect ratio
+    const canvasAspect = canvas.width / canvas.height;
     const imgAspect = mat.cols / mat.rows;
-    const canvasAspect = AppState.mainCanvas.width / AppState.mainCanvas.height;
     
-    let renderWidth, renderHeight, offsetX, offsetY;
+    let drawWidth, drawHeight, offsetX, offsetY;
     
     if (imgAspect > canvasAspect) {
-        renderHeight = AppState.mainCanvas.height;
-        renderWidth = imgAspect * renderHeight;
-        offsetX = (AppState.mainCanvas.width - renderWidth) / 2;
+        // Image is wider than canvas
+        drawHeight = canvas.height;
+        drawWidth = drawHeight * imgAspect;
+        offsetX = (canvas.width - drawWidth) / 2;
         offsetY = 0;
     } else {
-        renderWidth = AppState.mainCanvas.width;
-        renderHeight = renderWidth / imgAspect;
+        // Image is taller than canvas
+        drawWidth = canvas.width;
+        drawHeight = drawWidth / imgAspect;
         offsetX = 0;
-        offsetY = (AppState.mainCanvas.height - renderHeight) / 2;
+        offsetY = (canvas.height - drawHeight) / 2;
     }
+    
+    // Update display info
+    AppState.imageDisplayInfo.offsetX = offsetX;
+    AppState.imageDisplayInfo.offsetY = offsetY;
+    AppState.imageDisplayInfo.scale = drawWidth / mat.cols;
     
     // Apply zoom and pan
     const zoom = AppState.zoomLevel;
     const panX = AppState.panOffset.x;
     const panY = AppState.panOffset.y;
     
-    const scaledWidth = renderWidth * zoom;
-    const scaledHeight = renderHeight * zoom;
-    const scaledOffsetX = offsetX + (renderWidth - scaledWidth) / 2 + panX;
-    const scaledOffsetY = offsetY + (renderHeight - scaledHeight) / 2 + panY;
+    const scaledWidth = drawWidth * zoom;
+    const scaledHeight = drawHeight * zoom;
+    const scaledOffsetX = offsetX + (drawWidth - scaledWidth) / 2 + panX;
+    const scaledOffsetY = offsetY + (drawHeight - scaledHeight) / 2 + panY;
     
-    // Convert Mat to ImageData and draw
+    // Clear and draw
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Convert Mat to ImageData
     const imgData = new ImageData(
         new Uint8ClampedArray(mat.data),
         mat.cols,
         mat.rows
     );
     
-    // Create temporary canvas for ImageData
+    // Create temporary canvas
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = mat.cols;
     tempCanvas.height = mat.rows;
     const tempCtx = tempCanvas.getContext('2d');
     tempCtx.putImageData(imgData, 0, 0);
     
-    AppState.mainCtx.drawImage(
-        tempCanvas,
-        scaledOffsetX, scaledOffsetY,
-        scaledWidth, scaledHeight
-    );
+    // Draw the image
+    ctx.drawImage(tempCanvas, scaledOffsetX, scaledOffsetY, scaledWidth, scaledHeight);
     
     // Draw reference line if exists
-    if (AppState.referenceLine.start && AppState.referenceLine.end) {
-        const pixelDist = ImageUtils.distance(
-            AppState.referenceLine.start.x, AppState.referenceLine.start.y,
-            AppState.referenceLine.end.x, AppState.referenceLine.end.y
-        );
-        ImageUtils.drawReferenceLine(
-            AppState.mainCtx,
-            AppState.referenceLine.start.x, AppState.referenceLine.start.y,
-            AppState.referenceLine.end.x, AppState.referenceLine.end.y,
-            pixelDist,
-            AppState.scaleFactor
-        );
-    }
+    drawReferenceLineOnCanvas();
+}
+
+// Draw reference line on canvas
+function drawReferenceLineOnCanvas() {
+    const refLine = AppState.referenceLine;
+    if (!refLine.start || !refLine.end) return;
     
-    AppState.mainCtx.restore();
+    const ctx = AppState.mainCtx;
+    
+    // Convert image coordinates to screen coordinates
+    const startScreen = imageToScreenCoordinates(refLine.start.x, refLine.start.y);
+    const endScreen = imageToScreenCoordinates(refLine.end.x, refLine.end.y);
+    
+    // Calculate pixel distance in image coordinates
+    const pixelDistance = ImageUtils.distance(refLine.start.x, refLine.start.y, refLine.end.x, refLine.end.y);
+    
+    // Draw the line
+    ImageUtils.drawReferenceLine(
+        ctx,
+        startScreen.x, startScreen.y,
+        endScreen.x, endScreen.y,
+        pixelDistance,
+        AppState.scaleFactor
+    );
+    
+    // If currently drawing, draw temporary line
+    if (refLine.isDrawing && refLine.current) {
+        const currentScreen = imageToScreenCoordinates(refLine.current.x, refLine.current.y);
+        const tempDistance = ImageUtils.distance(refLine.start.x, refLine.start.y, refLine.current.x, refLine.current.y);
+        
+        ctx.save();
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(startScreen.x, startScreen.y);
+        ctx.lineTo(currentScreen.x, currentScreen.y);
+        ctx.stroke();
+        
+        // Draw measurement
+        const midX = (startScreen.x + currentScreen.x) / 2;
+        const midY = (startScreen.y + currentScreen.y) / 2;
+        
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${tempDistance.toFixed(1)} px`, midX, midY - 5);
+        ctx.restore();
+    }
 }
 
 // Canvas mouse event handlers
 function handleCanvasMouseDown(event) {
+    event.preventDefault();
+    
+    // Get canvas coordinates
     const rect = AppState.mainCanvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -441,16 +522,34 @@ function handleCanvasMouseDown(event) {
         }
     }
     
-    // Start drawing reference line
+    // Start drawing reference line (only if we have an image)
     if (AppState.capturedImage && !AppState.isCropping) {
-        AppState.referenceLine.start = { x, y };
-        AppState.referenceLine.end = null;
-        AppState.referenceLine.isDrawing = true;
-        AppState.referenceLine.current = { x, y };
+        // Convert screen coordinates to image coordinates
+        const imgCoords = screenToImageCoordinates(x, y);
+        
+        // Check if coordinates are within image bounds
+        if (imgCoords.x >= 0 && imgCoords.x <= AppState.imageDisplayInfo.imgWidth &&
+            imgCoords.y >= 0 && imgCoords.y <= AppState.imageDisplayInfo.imgHeight) {
+            
+            AppState.referenceLine.start = imgCoords;
+            AppState.referenceLine.screenStart = { x, y };
+            AppState.referenceLine.isDrawing = true;
+            AppState.referenceLine.current = imgCoords;
+            
+            // Redraw to show temporary line
+            if (AppState.isCameraActive) {
+                // Will be updated in next renderVideo frame
+            } else if (AppState.capturedImage) {
+                displayImageOnMainCanvas(AppState.capturedImage);
+            }
+        }
     }
 }
 
 function handleCanvasMouseMove(event) {
+    event.preventDefault();
+    
+    // Get canvas coordinates
     const rect = AppState.mainCanvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -480,7 +579,9 @@ function handleCanvasMouseMove(event) {
     
     // Update current position for reference line drawing
     if (AppState.referenceLine.isDrawing) {
-        AppState.referenceLine.current = { x, y };
+        // Convert screen coordinates to image coordinates
+        const imgCoords = screenToImageCoordinates(x, y);
+        AppState.referenceLine.current = imgCoords;
         
         // Redraw
         if (AppState.isCameraActive) {
@@ -492,6 +593,9 @@ function handleCanvasMouseMove(event) {
 }
 
 function handleCanvasMouseUp(event) {
+    event.preventDefault();
+    
+    // Get canvas coordinates
     const rect = AppState.mainCanvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -504,28 +608,47 @@ function handleCanvasMouseUp(event) {
     
     // Finish drawing reference line
     if (AppState.referenceLine.isDrawing && AppState.referenceLine.start) {
-        AppState.referenceLine.end = { x, y };
-        AppState.referenceLine.isDrawing = false;
-        AppState.referenceLine.current = null;
+        // Convert screen coordinates to image coordinates
+        const imgCoords = screenToImageCoordinates(x, y);
         
-        // Calculate pixel distance
-        const pixelDistance = ImageUtils.distance(
-            AppState.referenceLine.start.x, AppState.referenceLine.start.y,
-            AppState.referenceLine.end.x, AppState.referenceLine.end.y
-        );
-        
-        // Update UI
-        document.getElementById('pixelDistance').textContent = pixelDistance.toFixed(1);
-        
-        // Calculate scale factor
-        updateScaleFactor();
-        
-        // Redraw with permanent line
-        if (AppState.capturedImage) {
-            displayImageOnMainCanvas(AppState.capturedImage);
+        // Check if coordinates are within image bounds
+        if (imgCoords.x >= 0 && imgCoords.x <= AppState.imageDisplayInfo.imgWidth &&
+            imgCoords.y >= 0 && imgCoords.y <= AppState.imageDisplayInfo.imgHeight) {
+            
+            AppState.referenceLine.end = imgCoords;
+            AppState.referenceLine.screenEnd = { x, y };
+            AppState.referenceLine.isDrawing = false;
+            AppState.referenceLine.current = null;
+            
+            // Calculate pixel distance in image coordinates
+            const pixelDistance = ImageUtils.distance(
+                AppState.referenceLine.start.x, AppState.referenceLine.start.y,
+                AppState.referenceLine.end.x, AppState.referenceLine.end.y
+            );
+            
+            // Update UI
+            document.getElementById('pixelDistance').textContent = pixelDistance.toFixed(1);
+            
+            // Calculate scale factor
+            updateScaleFactor();
+            
+            // Redraw with permanent line
+            if (AppState.isCameraActive) {
+                // Will be updated in next renderVideo frame
+            } else if (AppState.capturedImage) {
+                displayImageOnMainCanvas(AppState.capturedImage);
+            }
+            
+            // Process image if this is the first reference set
+            if (AppState.capturedImage && !AppState.isCameraActive) {
+                processImage();
+            }
+            
+            updateStatus('Reference line set. Adjust diameter if needed.');
+        } else {
+            // Clicked outside image bounds, cancel drawing
+            clearReferenceLine();
         }
-        
-        updateStatus('Reference line set. Adjust diameter if needed.');
     }
 }
 
@@ -536,7 +659,8 @@ function handleCanvasTouchStart(event) {
         const touch = event.touches[0];
         const mouseEvent = new MouseEvent('mousedown', {
             clientX: touch.clientX,
-            clientY: touch.clientY
+            clientY: touch.clientY,
+            bubbles: true
         });
         AppState.mainCanvas.dispatchEvent(mouseEvent);
     }
@@ -548,7 +672,8 @@ function handleCanvasTouchMove(event) {
         const touch = event.touches[0];
         const mouseEvent = new MouseEvent('mousemove', {
             clientX: touch.clientX,
-            clientY: touch.clientY
+            clientY: touch.clientY,
+            bubbles: true
         });
         AppState.mainCanvas.dispatchEvent(mouseEvent);
     }
@@ -556,7 +681,7 @@ function handleCanvasTouchMove(event) {
 
 function handleCanvasTouchEnd(event) {
     event.preventDefault();
-    const mouseEvent = new MouseEvent('mouseup');
+    const mouseEvent = new MouseEvent('mouseup', { bubbles: true });
     AppState.mainCanvas.dispatchEvent(mouseEvent);
 }
 
@@ -571,6 +696,11 @@ function updateScaleFactor() {
     
     AppState.scaleFactor = pixelDistance / AppState.referenceDiameter;
     document.getElementById('scaleFactor').textContent = AppState.scaleFactor.toFixed(2);
+    
+    // Auto-process image if we have both reference and image
+    if (AppState.capturedImage && AppState.scaleFactor && AppState.pixelArea === 0) {
+        processImage();
+    }
 }
 
 // Clear reference line
@@ -579,6 +709,8 @@ function clearReferenceLine() {
     AppState.referenceLine.end = null;
     AppState.referenceLine.isDrawing = false;
     AppState.referenceLine.current = null;
+    AppState.referenceLine.screenStart = null;
+    AppState.referenceLine.screenEnd = null;
     AppState.scaleFactor = null;
     
     document.getElementById('pixelDistance').textContent = '--';
@@ -607,26 +739,16 @@ function enableCropping() {
     const centerX = canvasRect.width / 2;
     const centerY = canvasRect.height / 2;
     
-    // Convert crop diameter from cm to pixels using scale factor
-    let diameterPixels = 300; // Default if no scale
+    // Calculate crop diameter in pixels
+    let diameterPixels = 300; // Default
+    
+    // Try to use scale factor if available
     if (AppState.scaleFactor) {
         const cropDiameterCm = parseFloat(document.getElementById('cropDiameter').value) || 30.0;
         diameterPixels = cropDiameterCm * AppState.scaleFactor;
         
-        // Adjust for canvas scaling
-        const imgAspect = AppState.capturedImage.cols / AppState.capturedImage.rows;
-        const canvasAspect = AppState.mainCanvas.width / AppState.mainCanvas.height;
-        
-        let scaleFactorX, scaleFactorY;
-        if (imgAspect > canvasAspect) {
-            scaleFactorY = AppState.mainCanvas.height / AppState.capturedImage.rows;
-            scaleFactorX = scaleFactorY;
-        } else {
-            scaleFactorX = AppState.mainCanvas.width / AppState.capturedImage.cols;
-            scaleFactorY = scaleFactorX;
-        }
-        
-        diameterPixels *= scaleFactorX;
+        // Adjust for display scaling
+        diameterPixels *= AppState.imageDisplayInfo.scale;
     }
     
     // Ensure diameter fits within canvas
@@ -661,6 +783,38 @@ function enableCropping() {
     updateStatus('Cropping enabled. Drag circle to position, adjust diameter, then apply.');
 }
 
+// Update crop circle size when diameter changes
+function updateCropCircleSize() {
+    if (!AppState.isCropping || !AppState.cropCircle) return;
+    
+    const cropDiameterCm = parseFloat(document.getElementById('cropDiameter').value) || 30.0;
+    
+    // Calculate diameter in pixels
+    let diameterPixels = 300; // Default
+    
+    if (AppState.scaleFactor) {
+        diameterPixels = cropDiameterCm * AppState.scaleFactor;
+        // Adjust for display scaling
+        diameterPixels *= AppState.imageDisplayInfo.scale;
+    }
+    
+    // Ensure diameter fits within canvas
+    const canvasRect = AppState.mainCanvas.getBoundingClientRect();
+    diameterPixels = Math.min(diameterPixels, Math.min(canvasRect.width, canvasRect.height) * 0.9);
+    
+    // Update crop circle
+    const currentLeft = parseInt(AppState.cropCircle.style.left);
+    const currentTop = parseInt(AppState.cropCircle.style.top);
+    const currentCenterX = currentLeft + AppState.cropDiameterPixels / 2;
+    const currentCenterY = currentTop + AppState.cropDiameterPixels / 2;
+    
+    AppState.cropDiameterPixels = diameterPixels;
+    AppState.cropCircle.style.width = `${diameterPixels}px`;
+    AppState.cropCircle.style.height = `${diameterPixels}px`;
+    AppState.cropCircle.style.left = `${currentCenterX - diameterPixels/2}px`;
+    AppState.cropCircle.style.top = `${currentCenterY - diameterPixels/2}px`;
+}
+
 // Apply circular crop
 function applyCrop() {
     if (!AppState.capturedImage || !AppState.cropCircle || !AppState.isCropping) return;
@@ -673,52 +827,19 @@ function applyCrop() {
         const canvasRect = AppState.mainCanvas.getBoundingClientRect();
         const circleRect = AppState.cropCircle.getBoundingClientRect();
         
-        // Calculate center in image coordinates
-        const centerX = (circleRect.left - canvasRect.left + circleRect.width / 2);
-        const centerY = (circleRect.top - canvasRect.top + circleRect.height / 2);
+        // Calculate center in screen coordinates
+        const centerX = circleRect.left - canvasRect.left + circleRect.width / 2;
+        const centerY = circleRect.top - canvasRect.top + circleRect.height / 2;
         
         // Convert screen coordinates to image coordinates
-        const imgAspect = AppState.capturedImage.cols / AppState.capturedImage.rows;
-        const canvasAspect = AppState.mainCanvas.width / AppState.mainCanvas.height;
-        
-        let offsetX, offsetY, scale;
-        
-        if (imgAspect > canvasAspect) {
-            // Image wider than canvas
-            const renderHeight = AppState.mainCanvas.height;
-            const renderWidth = imgAspect * renderHeight;
-            offsetX = (AppState.mainCanvas.width - renderWidth) / 2;
-            offsetY = 0;
-            scale = renderHeight / AppState.capturedImage.rows;
-        } else {
-            // Image taller than canvas
-            const renderWidth = AppState.mainCanvas.width;
-            const renderHeight = renderWidth / imgAspect;
-            offsetX = 0;
-            offsetY = (AppState.mainCanvas.height - renderHeight) / 2;
-            scale = renderWidth / AppState.capturedImage.cols;
-        }
-        
-        // Adjust for zoom and pan
-        const zoom = AppState.zoomLevel;
-        const panX = AppState.panOffset.x;
-        const panY = AppState.panOffset.y;
-        
-        const scaledWidth = AppState.mainCanvas.width * zoom;
-        const scaledHeight = AppState.mainCanvas.height * zoom;
-        const scaledOffsetX = offsetX + (AppState.mainCanvas.width - scaledWidth) / 2 + panX;
-        const scaledOffsetY = offsetY + (AppState.mainCanvas.height - scaledHeight) / 2 + panY;
-        
-        // Calculate image coordinates
-        const imageCenterX = (centerX - scaledOffsetX) / (scale * zoom);
-        const imageCenterY = (centerY - scaledOffsetY) / (scale * zoom);
+        const imgCenter = screenToImageCoordinates(centerX, centerY);
         
         // Calculate diameter in image pixels
-        let diameterImagePixels = AppState.cropDiameterPixels / (scale * zoom);
+        let diameterImagePixels = AppState.cropDiameterPixels / (AppState.imageDisplayInfo.scale * AppState.zoomLevel);
         
         // Ensure coordinates are within image bounds
-        const clampedCenterX = Math.max(0, Math.min(AppState.capturedImage.cols, imageCenterX));
-        const clampedCenterY = Math.max(0, Math.min(AppState.capturedImage.rows, imageCenterY));
+        const clampedCenterX = Math.max(0, Math.min(AppState.capturedImage.cols, imgCenter.x));
+        const clampedCenterY = Math.max(0, Math.min(AppState.capturedImage.rows, imgCenter.y));
         diameterImagePixels = Math.min(
             diameterImagePixels,
             Math.min(clampedCenterX, AppState.capturedImage.cols - clampedCenterX) * 2,
@@ -737,6 +858,13 @@ function applyCrop() {
         AppState.capturedImage.delete();
         AppState.capturedImage = croppedImage;
         
+        // Update image dimensions
+        AppState.imageDisplayInfo.imgWidth = croppedImage.cols;
+        AppState.imageDisplayInfo.imgHeight = croppedImage.rows;
+        
+        // Clear reference line (since coordinates changed)
+        clearReferenceLine();
+        
         // Display cropped image
         displayImageOnMainCanvas(AppState.capturedImage);
         cv.imshow(AppState.outputCanvas, AppState.capturedImage);
@@ -744,7 +872,7 @@ function applyCrop() {
         // Clean up cropping
         cancelCrop();
         
-        updateStatus('Crop applied. Draw reference line if needed, then process.');
+        updateStatus('Crop applied. Draw reference line to set scale.');
         
     } catch (error) {
         console.error('Error applying crop:', error);
@@ -770,6 +898,45 @@ function cancelCrop() {
     }
     
     updateStatus('Cropping cancelled');
+}
+
+// Capture Image Function
+function captureImage() {
+    if (AppState.isCameraActive) {
+        // Capture from video
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = AppState.video.videoWidth;
+        tempCanvas.height = AppState.video.videoHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(AppState.video, 0, 0);
+        
+        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        AppState.originalImage = cv.matFromImageData(imageData);
+        AppState.capturedImage = AppState.originalImage.clone();
+        
+        // Update image dimensions
+        AppState.imageDisplayInfo.imgWidth = tempCanvas.width;
+        AppState.imageDisplayInfo.imgHeight = tempCanvas.height;
+        
+        // Stop camera
+        stopCamera();
+    }
+    
+    // Process and display
+    if (AppState.capturedImage) {
+        displayImageOnMainCanvas(AppState.capturedImage);
+        
+        // Show output canvas
+        cv.imshow(AppState.outputCanvas, AppState.capturedImage);
+        
+        // Enable crop button
+        document.getElementById('enableCrop').disabled = false;
+        
+        updateStatus('Image captured. Draw reference line across coin diameter.');
+        
+        // Clear any previous reference
+        clearReferenceLine();
+    }
 }
 
 // Zoom functions
@@ -855,26 +1022,35 @@ function processImage() {
                 // Update UI
                 document.getElementById('pixelArea').textContent = AppState.pixelArea.toFixed(0);
                 document.getElementById('actualArea').textContent = actualAreaCm2.toFixed(2);
+                
+                updateStatus('Area calculated. Ready for drape calculation.');
+            } else {
+                updateStatus('Contour found. Set reference for scale.');
             }
             
             // Draw the contour on processed image
             let processed = new cv.Mat(src.rows, src.cols, cv.CV_8UC3, [255, 255, 255, 255]);
             cv.drawContours(processed, contours, maxContourIndex, [0, 255, 0, 255], 2);
             
-            // Fill the contour area
-            cv.drawContours(processed, contours, maxContourIndex, [0, 255, 0, 255], -1);
+            // Fill the contour area with transparency
+            let filled = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [255, 255, 255, 0]);
+            cv.drawContours(filled, contours, maxContourIndex, [0, 255, 0, 100], -1);
+            
+            // Combine with original
+            cv.addWeighted(processed, 0.7, filled, 0.3, 0, processed);
             
             // Display processed image
             cv.imshow(AppState.processedCanvas, processed);
             
-            // Enable drape calculation
-            document.getElementById('calculateDrape').disabled = false;
-            document.getElementById('saveImage').disabled = false;
-            
-            updateStatus('Processing complete. Click "Calculate Drape %"');
+            // Enable drape calculation if we have scale
+            if (AppState.scaleFactor) {
+                document.getElementById('calculateDrape').disabled = false;
+                document.getElementById('saveImage').disabled = false;
+            }
             
             // Clean up
             processed.delete();
+            filled.delete();
         } else {
             updateStatus('No drape contour found. Try better lighting/contrast.');
         }
@@ -914,8 +1090,12 @@ function calculateDrapeCoefficient() {
         AppState.fabricDiameter
     );
     
+    // Get fabric properties
+    const fabricProps = DrapeFormulas.fabricProperties(drapeCoefficient);
+    
     // Update UI
-    document.getElementById('drapeCoefficient').textContent = drapeCoefficient.toFixed(2) + '%';
+    document.getElementById('drapeCoefficient').textContent = 
+        `${drapeCoefficient.toFixed(2)}% (${fabricProps})`;
     
     // Add to history
     addToHistory(AppState.drapeArea, drapeCoefficient);
@@ -952,7 +1132,7 @@ function resetApp() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
     
-    // Reset state
+    // Reset OpenCV mats
     if (AppState.originalImage) {
         AppState.originalImage.delete();
         AppState.originalImage = null;
@@ -963,6 +1143,7 @@ function resetApp() {
         AppState.capturedImage = null;
     }
     
+    // Reset state
     clearReferenceLine();
     cancelCrop();
     
@@ -1013,6 +1194,13 @@ function addToHistory(area, coefficient) {
 
 function deleteRow(button) {
     const row = button.closest('tr');
+    const index = Array.from(row.parentNode.children).indexOf(row);
+    
+    // Remove from measurements array
+    if (index !== -1) {
+        AppState.measurements.splice(index, 1);
+    }
+    
     row.remove();
 }
 
@@ -1045,34 +1233,52 @@ function exportToCSV() {
 function saveResultImage() {
     if (!AppState.capturedImage) return;
     
-    // Combine original and processed images
+    // Create a canvas with both images side by side
     const combinedCanvas = document.createElement('canvas');
     combinedCanvas.width = 800;
     combinedCanvas.height = 400;
     const ctx = combinedCanvas.getContext('2d');
     
+    // Draw background
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
+    
     // Draw original/cropped image
-    ctx.drawImage(AppState.outputCanvas, 0, 0, 400, 400);
+    const outputImgData = AppState.outputCtx.getImageData(0, 0, 400, 400);
+    ctx.putImageData(outputImgData, 0, 0);
     
     // Draw processed image
-    ctx.drawImage(AppState.processedCanvas, 400, 0, 400, 400);
+    const processedImgData = AppState.processedCtx.getImageData(0, 0, 400, 400);
+    ctx.putImageData(processedImgData, 400, 0);
     
-    // Add text overlay
+    // Add labels
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(0, 0, 800, 30);
+    ctx.fillRect(0, 370, 800, 30);
     
     ctx.fillStyle = 'white';
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Drape Measurement Results', 400, 20);
+    ctx.fillText('Original / Cropped', 200, 20);
+    ctx.fillText('Processed Result', 600, 20);
     
-    ctx.textAlign = 'left';
+    // Add measurements
     ctx.font = '12px Arial';
-    ctx.fillText(`Area: ${AppState.drapeArea ? AppState.drapeArea.toFixed(2) : '--'} cm²`, 10, 360);
-    ctx.fillText(`Drape: ${document.getElementById('drapeCoefficient').textContent}`, 10, 380);
+    ctx.textAlign = 'left';
+    ctx.fillText(`Area: ${AppState.drapeArea ? AppState.drapeArea.toFixed(2) : '--'} cm²`, 10, 385);
+    ctx.fillText(`Drape: ${document.getElementById('drapeCoefficient').textContent}`, 410, 385);
+    
+    // Add timestamp
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#666';
+    ctx.font = '10px Arial';
+    const now = new Date();
+    ctx.fillText(now.toLocaleString(), 790, 390);
     
     // Save image
-    FileUtils.saveImage(combinedCanvas, `drape-measurement-${new Date().getTime()}.png`);
+    FileUtils.saveImage(combinedCanvas, `drape-measurement-${now.getTime()}.png`);
+    
+    updateStatus('Result image saved');
 }
 
 // Initialize app when DOM is loaded
