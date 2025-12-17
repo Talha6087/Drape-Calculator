@@ -1,3 +1,4 @@
+
 * {
     margin: 0;
     padding: 0;
@@ -10,6 +11,7 @@ body {
     color: #333;
     line-height: 1.6;
     padding: 10px;
+    min-height: 100vh;
 }
 
 .container {
@@ -44,11 +46,6 @@ header h1 {
     padding: 25px;
     margin-bottom: 25px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease;
-}
-
-.card:hover {
-    transform: translateY(-5px);
 }
 
 .card h2, .card h3 {
@@ -71,8 +68,8 @@ header h1 {
     background: #f8f9fa;
     border-radius: 10px;
     overflow: hidden;
-    margin-bottom: 20px;
-    border: 2px dashed #ddd;
+    margin-bottom: 15px;
+    border: 2px solid #ddd;
 }
 
 .image-wrapper {
@@ -119,17 +116,19 @@ header h1 {
     transform: scale(1.1);
 }
 
-.crop-controls {
-    background: rgba(255, 255, 255, 0.95);
+.click-instruction {
+    text-align: center;
     padding: 15px;
-    border-radius: 10px;
-    margin-top: 15px;
-    border: 2px solid #3498db;
+    background: #e8f4fc;
+    margin: 0;
+    border-top: 1px solid #ddd;
+    color: #2c3e50;
+    font-weight: 600;
 }
 
-.crop-controls h4 {
-    margin-bottom: 15px;
-    color: #2c3e50;
+.click-instruction i {
+    color: #3498db;
+    margin-right: 8px;
 }
 
 /* Controls */
@@ -141,10 +140,8 @@ header h1 {
 }
 
 .capture-controls {
-    display: flex;
-    gap: 15px;
-    justify-content: center;
-    margin-top: 20px;
+    text-align: center;
+    margin-top: 15px;
 }
 
 .btn {
@@ -154,7 +151,7 @@ header h1 {
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
@@ -179,11 +176,6 @@ header h1 {
 
 .btn-info {
     background: linear-gradient(135deg, #9b59b6, #8e44ad);
-    color: white;
-}
-
-.btn-warning {
-    background: linear-gradient(135deg, #f39c12, #e67e22);
     color: white;
 }
 
@@ -215,6 +207,34 @@ header h1 {
     transform: none;
 }
 
+/* Instructions */
+.instructions {
+    background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+}
+
+.instructions ol {
+    margin-left: 20px;
+    margin-bottom: 15px;
+}
+
+.instructions li {
+    margin-bottom: 10px;
+    padding-left: 5px;
+}
+
+.tip {
+    background: rgba(255, 255, 255, 0.3);
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-style: italic;
+}
+
+.tip i {
+    color: #f39c12;
+    margin-right: 8px;
+}
+
 /* Reference Instructions */
 .reference-instructions {
     background: #e8f4fc;
@@ -233,20 +253,31 @@ header h1 {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 20px;
-    align-items: end;
+    align-items: start;
 }
 
 .reference-display {
     background: #f8f9fa;
     padding: 15px;
     border-radius: 8px;
-    text-align: center;
 }
 
-.reference-display p {
+.reference-info p {
     margin-bottom: 8px;
-    font-weight: 600;
     color: #2c3e50;
+}
+
+.reference-info strong {
+    color: #2c3e50;
+}
+
+#detectionStatus {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
+#detectionStatus.detected {
+    color: #27ae60;
 }
 
 /* Form Controls */
@@ -286,6 +317,17 @@ label {
     border-color: #3498db;
 }
 
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+}
+
 /* Results */
 .results-container {
     display: grid;
@@ -313,6 +355,14 @@ label {
     font-size: 1.5rem;
     font-weight: bold;
     color: #2c3e50;
+}
+
+#drapeCoefficient {
+    color: #27ae60;
+}
+
+#fabricProperty {
+    color: #3498db;
 }
 
 /* Image Comparison */
@@ -365,56 +415,50 @@ tbody tr:hover {
     background: #f5f7fa;
 }
 
-/* Instructions */
-.instructions {
-    background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+.history-controls {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
 }
 
-.instructions ol {
-    margin-left: 20px;
+/* Loading Animation */
+.loader {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
-.instructions li {
-    margin-bottom: 10px;
-    padding-left: 5px;
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
-/* Selection Line Styling */
-.selection-line {
+/* Coin Circle Styling */
+.coin-circle {
     position: absolute;
-    pointer-events: none;
-    z-index: 5;
-}
-
-.selection-line .line {
-    stroke: #ff0000;
-    stroke-width: 2;
-    stroke-dasharray: 5, 5;
-}
-
-.selection-line .start-point,
-.selection-line .end-point {
-    fill: #ff0000;
-    stroke: white;
-    stroke-width: 2;
-    r: 6;
-}
-
-.selection-line .measurement {
-    fill: white;
-    font-size: 12px;
-    font-weight: bold;
-    text-anchor: middle;
-}
-
-/* Cropping Circle */
-.crop-circle {
-    position: absolute;
-    pointer-events: none;
-    border: 2px dashed #3498db;
+    border: 2px solid #e74c3c;
     border-radius: 50%;
     background: transparent;
-    z-index: 4;
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: 0 0 10px rgba(231, 76, 60, 0.3);
+}
+
+.coin-circle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 10px;
+    height: 10px;
+    background: #e74c3c;
+    border-radius: 50%;
+    border: 2px solid white;
 }
 
 /* Responsive Design */
@@ -442,20 +486,8 @@ tbody tr:hover {
     .reference-selection {
         grid-template-columns: 1fr;
     }
-}
-
-/* Loading Animation */
-.loader {
-    display: inline-block;
-    width: 20px;
-    height: 20px;
-    border: 3px solid #f3f3f3;
-    border-top: 3px solid #3498db;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    
+    .form-row {
+        flex-direction: column;
+    }
 }
