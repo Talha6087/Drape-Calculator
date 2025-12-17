@@ -1,5 +1,3 @@
-[file name]: script.js
-[file content begin]
 // Main Application State
 const AppState = {
     video: null,
@@ -47,6 +45,7 @@ const AppState = {
 // OpenCV Ready Handler
 function onOpenCvReady() {
     console.log('OpenCV loaded, version:', cv.getBuildInformation());
+    UIUtils.showToast('OpenCV loaded successfully', 'success');
     updateStatus('OpenCV loaded successfully');
     
     // Initialize elements
@@ -82,13 +81,18 @@ function setCanvasSizes() {
     
     AppState.imageDisplayInfo.canvasWidth = width;
     AppState.imageDisplayInfo.canvasHeight = height;
+    
+    console.log('Canvas sizes set:', width, 'x', height);
 }
 
 // Initialize all event listeners
 function initializeEventListeners() {
+    console.log('Initializing event listeners...');
+    
     // Camera controls
     document.getElementById('startCamera').addEventListener('click', startCamera);
     document.getElementById('uploadImage').addEventListener('click', () => {
+        console.log('Upload image clicked');
         document.getElementById('imageUpload').click();
     });
     document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
@@ -160,19 +164,33 @@ function initializeEventListeners() {
     
     // Window resize
     window.addEventListener('resize', setCanvasSizes);
+    
+    console.log('Event listeners initialized');
 }
 
 // Handle image upload
 async function handleImageUpload(event) {
+    console.log('Image upload triggered');
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+        console.log('No file selected');
+        return;
+    }
+    
+    // Check if file is an image
+    if (!file.type.match('image.*')) {
+        alert('Please select an image file');
+        return;
+    }
     
     try {
         UIUtils.showLoading(true);
         updateStatus('Loading image...');
+        console.log('Loading image:', file.name);
         
         // Load image using FileUtils
         const img = await FileUtils.loadImage(file);
+        console.log('Image loaded:', img.width, 'x', img.height);
         
         // Convert to OpenCV Mat
         const tempCanvas = document.createElement('canvas');
@@ -182,12 +200,20 @@ async function handleImageUpload(event) {
         tempCtx.drawImage(img, 0, 0);
         
         const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        
+        // Check if OpenCV is ready
+        if (typeof cv === 'undefined') {
+            throw new Error('OpenCV not loaded');
+        }
+        
         AppState.originalImage = cv.matFromImageData(imageData);
         AppState.capturedImage = AppState.originalImage.clone();
         
         // Store image dimensions
         AppState.imageDisplayInfo.imgWidth = img.width;
         AppState.imageDisplayInfo.imgHeight = img.height;
+        
+        console.log('Image converted to OpenCV Mat:', AppState.capturedImage.cols, 'x', AppState.capturedImage.rows);
         
         // Display image
         displayImageOnMainCanvas(AppState.capturedImage);
@@ -200,6 +226,7 @@ async function handleImageUpload(event) {
         document.getElementById('reset').disabled = false;
         
         updateStatus('Image loaded. Click precisely on the coin in the image.');
+        UIUtils.showToast('Image loaded successfully', 'success');
         
         // Reset zoom and clear any previous reference
         resetZoom();
@@ -208,6 +235,7 @@ async function handleImageUpload(event) {
     } catch (error) {
         console.error('Error loading image:', error);
         updateStatus('Error loading image');
+        UIUtils.showToast('Error loading image: ' + error.message, 'error');
         alert('Error loading image. Please try another image.');
     } finally {
         UIUtils.showLoading(false);
@@ -218,9 +246,15 @@ async function handleImageUpload(event) {
 
 // Start Camera Function
 async function startCamera() {
+    console.log('Starting camera...');
     try {
         updateStatus('Accessing camera...');
         UIUtils.showLoading(true);
+        
+        // Check if browser supports mediaDevices
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Camera API not supported in this browser');
+        }
         
         const constraints = {
             video: {
@@ -230,7 +264,10 @@ async function startCamera() {
             }
         };
         
+        console.log('Requesting camera with constraints:', constraints);
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('Camera access granted');
+        
         AppState.video.srcObject = stream;
         AppState.isCameraActive = true;
         AppState.video.style.display = 'block';
@@ -241,21 +278,48 @@ async function startCamera() {
         document.getElementById('capture').disabled = false;
         document.getElementById('reset').disabled = false;
         
-        // Wait for video dimensions
-        AppState.video.onloadedmetadata = () => {
-            AppState.imageDisplayInfo.imgWidth = AppState.video.videoWidth;
-            AppState.imageDisplayInfo.imgHeight = AppState.video.videoHeight;
-        };
+        // Wait for video metadata
+        await new Promise((resolve) => {
+            AppState.video.onloadedmetadata = () => {
+                console.log('Video metadata loaded:', AppState.video.videoWidth, 'x', AppState.video.videoHeight);
+                AppState.imageDisplayInfo.imgWidth = AppState.video.videoWidth;
+                AppState.imageDisplayInfo.imgHeight = AppState.video.videoHeight;
+                resolve();
+            };
+            AppState.video.onerror = (err) => {
+                console.error('Video error:', err);
+                reject(new Error('Failed to load video'));
+            };
+        });
         
         // Start video rendering
         requestAnimationFrame(renderVideo);
         
         updateStatus('Camera active. Position drape and coin, then click "Capture Image"');
+        UIUtils.showToast('Camera started successfully', 'success');
         
     } catch (error) {
         console.error('Error accessing camera:', error);
         updateStatus('Error: Could not access camera');
-        alert('Camera access denied. Please allow camera permissions.');
+        UIUtils.showToast('Camera error: ' + error.message, 'error');
+        
+        // Show detailed error message
+        let errorMessage = 'Camera access denied. ';
+        if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+            errorMessage += 'No camera found.';
+        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+            errorMessage += 'Camera is already in use by another application.';
+        } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+            errorMessage += 'Camera constraints could not be satisfied.';
+        } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+            errorMessage += 'Camera permission denied. Please allow camera access.';
+        } else if (error.name === 'TypeError' || error.message.includes('getUserMedia')) {
+            errorMessage += 'Camera API not supported. Try Chrome, Firefox, or Edge.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
     } finally {
         UIUtils.showLoading(false);
     }
@@ -269,7 +333,8 @@ function renderVideo() {
     const ctx = AppState.mainCtx;
     const video = AppState.video;
     
-    if (!video.videoWidth || !video.videoHeight) {
+    // Check if video is ready
+    if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0 || video.videoHeight === 0) {
         requestAnimationFrame(renderVideo);
         return;
     }
@@ -318,7 +383,10 @@ function renderVideo() {
 
 // Display image on main canvas
 function displayImageOnMainCanvas(mat) {
-    if (!mat || mat.empty()) return;
+    if (!mat || mat.empty()) {
+        console.error('Invalid or empty image matrix');
+        return;
+    }
     
     const canvas = AppState.mainCanvas;
     const ctx = AppState.mainCtx;
@@ -361,32 +429,49 @@ function displayImageOnMainCanvas(mat) {
     // Clear and draw
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Convert Mat to ImageData
-    const imgData = new ImageData(
-        new Uint8ClampedArray(mat.data),
-        mat.cols,
-        mat.rows
-    );
-    
-    // Create temporary canvas
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = mat.cols;
-    tempCanvas.height = mat.rows;
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCtx.putImageData(imgData, 0, 0);
-    
-    // Draw the image
-    ctx.drawImage(tempCanvas, scaledOffsetX, scaledOffsetY, scaledWidth, scaledHeight);
+    try {
+        // Convert Mat to ImageData
+        const imgData = new ImageData(
+            new Uint8ClampedArray(mat.data),
+            mat.cols,
+            mat.rows
+        );
+        
+        // Create temporary canvas
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = mat.cols;
+        tempCanvas.height = mat.rows;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.putImageData(imgData, 0, 0);
+        
+        // Draw the image
+        ctx.drawImage(tempCanvas, scaledOffsetX, scaledOffsetY, scaledWidth, scaledHeight);
+        
+    } catch (error) {
+        console.error('Error displaying image:', error);
+        // Fallback: Draw a placeholder
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#333';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Error displaying image', canvas.width / 2, canvas.height / 2);
+    }
 }
 
 // Handle canvas click for coin detection
 function handleCanvasClick(event) {
-    if (!AppState.capturedImage || AppState.isProcessing) return;
+    if (!AppState.capturedImage || AppState.isProcessing) {
+        UIUtils.showToast('Please load an image first', 'error');
+        return;
+    }
     
     // Get click coordinates
     const rect = AppState.mainCanvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    
+    console.log('Canvas clicked at:', x, y);
     
     // Detect coin at clicked location
     detectCoin(x, y);
@@ -432,19 +517,25 @@ function screenToImageCoordinates(screenX, screenY) {
 
 // Detect coin at clicked location
 function detectCoin(screenX, screenY) {
-    if (!AppState.capturedImage || AppState.isProcessing) return;
+    if (!AppState.capturedImage || AppState.isProcessing) {
+        UIUtils.showToast('Please load an image first', 'error');
+        return;
+    }
     
     try {
         UIUtils.showLoading(true);
         updateStatus('Detecting coin...');
+        console.log('Starting coin detection...');
         
         // Convert screen coordinates to image coordinates
         const imgCoords = screenToImageCoordinates(screenX, screenY);
+        console.log('Image coordinates:', imgCoords);
         
         // Validate coordinates are within image bounds
         if (imgCoords.x < 0 || imgCoords.x >= AppState.imageDisplayInfo.imgWidth ||
             imgCoords.y < 0 || imgCoords.y >= AppState.imageDisplayInfo.imgHeight) {
             updateStatus('Click must be within the image area');
+            UIUtils.showToast('Click must be within the image area', 'error');
             UIUtils.showLoading(false);
             return;
         }
@@ -461,6 +552,8 @@ function detectCoin(screenX, screenY) {
         }
         
         if (detectedCircle) {
+            console.log('Coin detected:', detectedCircle);
+            
             // Store detected coin
             AppState.detectedCoin = detectedCircle;
             
@@ -485,7 +578,9 @@ function detectCoin(screenX, screenY) {
             document.getElementById('clearReference').disabled = false;
             
             updateStatus('Coin detected! Processing drape area...');
+            UIUtils.showToast('Coin detected successfully', 'success');
         } else {
+            console.log('Coin not detected');
             updateStatus('Could not detect coin. Click closer to coin center.');
             UIUtils.showToast('Click closer to the center of the coin', 'error');
         }
@@ -496,7 +591,7 @@ function detectCoin(screenX, screenY) {
     } catch (error) {
         console.error('Coin detection error:', error);
         updateStatus('Error detecting coin');
-        UIUtils.showToast('Error detecting coin', 'error');
+        UIUtils.showToast('Error detecting coin: ' + error.message, 'error');
     } finally {
         UIUtils.showLoading(false);
     }
@@ -524,6 +619,8 @@ function detectCoinHough(src, clickX, clickY) {
             50      // maxRadius (pixels) - maximum coin size
         );
         
+        console.log('Hough circles found:', circles.cols);
+        
         let bestCircle = null;
         let minDistance = Infinity;
         
@@ -540,6 +637,7 @@ function detectCoinHough(src, clickX, clickY) {
             if (distance < Math.max(radius, 30) && distance < minDistance) {
                 minDistance = distance;
                 bestCircle = { x, y, radius };
+                console.log('Found circle at:', x, y, 'radius:', radius, 'distance:', distance);
             }
         }
         
@@ -577,6 +675,8 @@ function detectCoinContour(src, clickX, clickY) {
         let hierarchy = new cv.Mat();
         cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
+        console.log('Contours found:', contours.size());
+        
         let bestCircle = null;
         let minDistance = Infinity;
         
@@ -608,6 +708,7 @@ function detectCoinContour(src, clickX, clickY) {
                 if (distance < Math.max(radius, 30) && distance < minDistance) {
                     minDistance = distance;
                     bestCircle = { x, y, radius };
+                    console.log('Found contour circle at:', x, y, 'radius:', radius, 'circularity:', circularity);
                 }
             }
         }
@@ -630,7 +731,7 @@ function detectCoinContour(src, clickX, clickY) {
 
 // Draw detected coin circle on canvas
 function drawCoinCircle() {
-    if (!AppState.detectedCoin || !AppState.coinCircleElement) return;
+    if (!AppState.detectedCoin) return;
     
     // Remove previous circle if exists
     if (AppState.coinCircleElement) {
@@ -714,6 +815,8 @@ function updateScaleFactor() {
     const pixelDiameter = AppState.detectedCoin.radius * 2;
     AppState.scaleFactor = pixelDiameter / AppState.referenceDiameter;
     
+    console.log('Scale factor calculated:', AppState.scaleFactor, 'px/cm');
+    
     // Update UI
     document.getElementById('scaleFactor').textContent = AppState.scaleFactor.toFixed(2);
 }
@@ -727,6 +830,8 @@ function processDrapeArea() {
     
     setTimeout(() => {
         try {
+            console.log('Processing drape area...');
+            
             // Create a copy of the image
             let src = AppState.capturedImage.clone();
             
@@ -747,6 +852,8 @@ function processDrapeArea() {
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            
+            console.log('Found contours:', contours.size());
             
             // Find the largest contour (drape area)
             let maxArea = 0;
@@ -769,6 +876,8 @@ function processDrapeArea() {
                 const actualAreaCm2 = pixelArea / (AppState.scaleFactor * AppState.scaleFactor);
                 AppState.drapeArea = actualAreaCm2;
                 
+                console.log('Drape area calculated:', pixelArea, 'px² =', actualAreaCm2, 'cm²');
+                
                 // Update UI
                 document.getElementById('actualArea').textContent = actualAreaCm2.toFixed(2);
                 
@@ -782,8 +891,11 @@ function processDrapeArea() {
                 document.getElementById('saveImage').disabled = false;
                 
                 updateStatus('Drape area processed successfully');
+                UIUtils.showToast('Drape area processed successfully', 'success');
             } else {
+                console.log('No drape area found');
                 updateStatus('Could not detect drape area. Ensure good contrast.');
+                UIUtils.showToast('Could not detect drape area. Ensure good contrast.', 'error');
             }
             
             // Clean up
@@ -797,6 +909,7 @@ function processDrapeArea() {
         } catch (error) {
             console.error('Drape processing error:', error);
             updateStatus('Error processing drape area');
+            UIUtils.showToast('Error processing drape area: ' + error.message, 'error');
         } finally {
             AppState.isProcessing = false;
         }
@@ -845,6 +958,8 @@ function calculateDrapeCoefficient() {
         return;
     }
     
+    console.log('Calculating drape coefficient...');
+    
     // Calculate drape coefficient
     const drapeCoefficient = DrapeFormulas.drapeCoefficient(
         AppState.drapeArea,
@@ -855,6 +970,8 @@ function calculateDrapeCoefficient() {
     // Get fabric properties
     const fabricProps = DrapeFormulas.fabricProperties(drapeCoefficient);
     
+    console.log('Drape coefficient:', drapeCoefficient, 'Fabric:', fabricProps);
+    
     // Update UI
     document.getElementById('drapeCoefficient').textContent = `${drapeCoefficient.toFixed(2)}%`;
     document.getElementById('fabricProperty').textContent = fabricProps;
@@ -863,21 +980,37 @@ function calculateDrapeCoefficient() {
     addToHistory(AppState.drapeArea, drapeCoefficient, fabricProps);
     
     updateStatus(`Drape: ${drapeCoefficient.toFixed(2)}% - ${fabricProps}`);
+    UIUtils.showToast(`Drape coefficient: ${drapeCoefficient.toFixed(2)}% (${fabricProps})`, 'success');
     
     return drapeCoefficient;
 }
 
 // Capture Image Function
 function captureImage() {
-    if (AppState.isCameraActive) {
-        // Capture from video
+    if (!AppState.isCameraActive) {
+        UIUtils.showToast('Start camera first', 'error');
+        return;
+    }
+    
+    console.log('Capturing image from camera...');
+    
+    try {
+        UIUtils.showLoading(true);
+        updateStatus('Capturing image...');
+        
+        // Create temporary canvas
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = AppState.video.videoWidth;
         tempCanvas.height = AppState.video.videoHeight;
         const tempCtx = tempCanvas.getContext('2d');
+        
+        // Draw current video frame to canvas
         tempCtx.drawImage(AppState.video, 0, 0);
         
+        // Get image data
         const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        
+        // Convert to OpenCV Mat
         AppState.originalImage = cv.matFromImageData(imageData);
         AppState.capturedImage = AppState.originalImage.clone();
         
@@ -885,26 +1018,36 @@ function captureImage() {
         AppState.imageDisplayInfo.imgWidth = tempCanvas.width;
         AppState.imageDisplayInfo.imgHeight = tempCanvas.height;
         
+        console.log('Image captured:', tempCanvas.width, 'x', tempCanvas.height);
+        
         // Stop camera
         stopCamera();
-    }
-    
-    // Process and display
-    if (AppState.capturedImage) {
+        
+        // Process and display
         displayImageOnMainCanvas(AppState.capturedImage);
         
         // Show output canvas
         cv.imshow(AppState.outputCanvas, AppState.capturedImage);
         
         updateStatus('Image captured. Click precisely on the coin in the image.');
+        UIUtils.showToast('Image captured successfully', 'success');
         
         // Clear any previous reference
         clearReference();
+        
+    } catch (error) {
+        console.error('Error capturing image:', error);
+        updateStatus('Error capturing image');
+        UIUtils.showToast('Error capturing image: ' + error.message, 'error');
+    } finally {
+        UIUtils.showLoading(false);
     }
 }
 
 // Clear reference
 function clearReference() {
+    console.log('Clearing reference...');
+    
     // Remove coin circle
     if (AppState.coinCircleElement) {
         AppState.coinCircleElement.remove();
@@ -941,6 +1084,8 @@ function adjustZoom(factor) {
     AppState.zoomLevel *= factor;
     AppState.zoomLevel = Math.max(0.1, Math.min(10, AppState.zoomLevel));
     
+    console.log('Zoom level:', AppState.zoomLevel);
+    
     // Redraw
     if (AppState.isCameraActive) {
         // Will be updated in next renderVideo frame
@@ -955,6 +1100,8 @@ function adjustZoom(factor) {
 function resetZoom() {
     AppState.zoomLevel = 1.0;
     AppState.panOffset = { x: 0, y: 0 };
+    
+    console.log('Zoom reset');
     
     if (AppState.isCameraActive) {
         // Will be updated in next renderVideo frame
@@ -974,8 +1121,12 @@ function updateStatus(message) {
 
 function stopCamera() {
     if (AppState.video.srcObject) {
-        const tracks = AppState.video.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
+        const stream = AppState.video.srcObject;
+        const tracks = stream.getTracks();
+        tracks.forEach(track => {
+            track.stop();
+            stream.removeTrack(track);
+        });
         AppState.video.srcObject = null;
         AppState.isCameraActive = false;
         AppState.video.style.display = 'none';
@@ -983,9 +1134,13 @@ function stopCamera() {
     
     document.getElementById('startCamera').disabled = false;
     document.getElementById('uploadImage').disabled = false;
+    
+    console.log('Camera stopped');
 }
 
 function resetApp() {
+    console.log('Resetting app...');
+    
     stopCamera();
     
     // Clear canvases
@@ -1018,6 +1173,7 @@ function resetApp() {
     document.getElementById('saveImage').disabled = true;
     
     updateStatus('App reset. Ready to start again.');
+    UIUtils.showToast('App reset successfully', 'info');
 }
 
 function addToHistory(area, coefficient, property) {
@@ -1045,6 +1201,8 @@ function addToHistory(area, coefficient, property) {
         coefficient: coefficient,
         property: property
     });
+    
+    console.log('Added to history:', area, coefficient, property);
 }
 
 function deleteRow(button) {
@@ -1083,53 +1241,61 @@ function exportToCSV() {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+    
+    console.log('CSV exported:', AppState.measurements.length, 'measurements');
 }
 
 function saveResultImage() {
-    if (!AppState.capturedImage) return;
-    
-    // Create a canvas with both images side by side
-    const combinedCanvas = document.createElement('canvas');
-    combinedCanvas.width = 800;
-    combinedCanvas.height = 400;
-    const ctx = combinedCanvas.getContext('2d');
-    
-    // Draw background
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
-    
-    // Draw original image with coin circle
-    const originalImg = new Image();
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = AppState.capturedImage.cols;
-    tempCanvas.height = AppState.capturedImage.rows;
-    const tempCtx = tempCanvas.getContext('2d');
-    const imgData = new ImageData(
-        new Uint8ClampedArray(AppState.capturedImage.data),
-        AppState.capturedImage.cols,
-        AppState.capturedImage.rows
-    );
-    tempCtx.putImageData(imgData, 0, 0);
-    
-    // Draw coin circle on original
-    if (AppState.detectedCoin) {
-        tempCtx.beginPath();
-        tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
-                   AppState.detectedCoin.radius, 0, Math.PI * 2);
-        tempCtx.strokeStyle = '#e74c3c';
-        tempCtx.lineWidth = 3;
-        tempCtx.stroke();
-        
-        tempCtx.beginPath();
-        tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
-                   5, 0, Math.PI * 2);
-        tempCtx.fillStyle = '#e74c3c';
-        tempCtx.fill();
+    if (!AppState.capturedImage) {
+        UIUtils.showToast('No image to save', 'error');
+        return;
     }
     
-    originalImg.src = tempCanvas.toDataURL();
-    originalImg.onload = () => {
-        ctx.drawImage(originalImg, 0, 0, 400, 400);
+    console.log('Saving result image...');
+    
+    try {
+        // Create a canvas with both images side by side
+        const combinedCanvas = document.createElement('canvas');
+        combinedCanvas.width = 800;
+        combinedCanvas.height = 400;
+        const ctx = combinedCanvas.getContext('2d');
+        
+        // Draw background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
+        
+        // Draw original image with coin circle
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = AppState.capturedImage.cols;
+        tempCanvas.height = AppState.capturedImage.rows;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Convert Mat to ImageData
+        const imgData = new ImageData(
+            new Uint8ClampedArray(AppState.capturedImage.data),
+            AppState.capturedImage.cols,
+            AppState.capturedImage.rows
+        );
+        tempCtx.putImageData(imgData, 0, 0);
+        
+        // Draw coin circle on original
+        if (AppState.detectedCoin) {
+            tempCtx.beginPath();
+            tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
+                       AppState.detectedCoin.radius, 0, Math.PI * 2);
+            tempCtx.strokeStyle = '#e74c3c';
+            tempCtx.lineWidth = 3;
+            tempCtx.stroke();
+            
+            tempCtx.beginPath();
+            tempCtx.arc(AppState.detectedCoin.x, AppState.detectedCoin.y, 
+                       5, 0, Math.PI * 2);
+            tempCtx.fillStyle = '#e74c3c';
+            tempCtx.fill();
+        }
+        
+        // Draw original image
+        ctx.drawImage(tempCanvas, 0, 0, 400, 400);
         
         // Draw processed image
         ctx.drawImage(AppState.processedCanvas, 400, 0, 400, 400);
@@ -1162,16 +1328,375 @@ function saveResultImage() {
         FileUtils.saveImage(combinedCanvas, `drape-measurement-${now.getTime()}.png`);
         
         updateStatus('Result image saved');
-    };
+        UIUtils.showToast('Result image saved successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error saving result image:', error);
+        UIUtils.showToast('Error saving image: ' + error.message, 'error');
+    }
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, checking OpenCV...');
+    
     // Check if OpenCV is already loaded
     if (typeof cv !== 'undefined' && cv.getBuildInformation) {
+        console.log('OpenCV already loaded');
         onOpenCvReady();
     } else {
+        console.log('OpenCV not loaded yet, waiting...');
         updateStatus('Loading OpenCV...');
+        
+        // Check every 500ms if OpenCV is loaded
+        const checkOpenCV = setInterval(() => {
+            if (typeof cv !== 'undefined' && cv.getBuildInformation) {
+                clearInterval(checkOpenCV);
+                onOpenCvReady();
+            }
+        }, 500);
+        
+        // Timeout after 30 seconds
+        setTimeout(() => {
+            clearInterval(checkOpenCV);
+            if (typeof cv === 'undefined') {
+                updateStatus('Error: OpenCV failed to load. Please refresh the page.');
+                UIUtils.showToast('OpenCV failed to load. Please refresh.', 'error');
+                console.error('OpenCV failed to load after 30 seconds');
+            }
+        }, 30000);
     }
 });
 [file content end]
+```
+
+Also update utils.js to ensure FileUtils.loadImage works correctly:
+
+```javascript
+[file name]: utils.js
+[file content begin]
+// Utility functions for the Drape Calculator
+
+// Image processing utilities
+const ImageUtils = {
+    // Convert between coordinate systems
+    scaleCoordinates: function(x, y, fromWidth, fromHeight, toWidth, toHeight) {
+        return {
+            x: (x / fromWidth) * toWidth,
+            y: (y / fromHeight) * toHeight
+        };
+    },
+    
+    // Calculate distance between two points
+    distance: function(x1, y1, x2, y2) {
+        return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    },
+    
+    // Apply circular crop to image
+    applyCircularCrop: function(srcMat, centerX, centerY, diameterPixels) {
+        try {
+            // Create a circular mask
+            let mask = new cv.Mat.zeros(srcMat.rows, srcMat.cols, cv.CV_8UC1);
+            let center = new cv.Point(centerX, centerY);
+            let radius = Math.floor(diameterPixels / 2);
+            
+            // Draw white circle on mask
+            cv.circle(mask, center, radius, new cv.Scalar(255, 255, 255), -1);
+            
+            // Apply mask to source image
+            let result = new cv.Mat();
+            srcMat.copyTo(result, mask);
+            
+            // Clean up
+            mask.delete();
+            
+            return result;
+        } catch (error) {
+            console.error('Error in circular crop:', error);
+            return srcMat.clone();
+        }
+    }
+};
+
+// Validation utilities
+const Validation = {
+    isNumber: function(value) {
+        return !isNaN(parseFloat(value)) && isFinite(value);
+    },
+    
+    validateDiameter: function(diameter) {
+        if (!this.isNumber(diameter)) {
+            return { valid: false, error: 'Diameter must be a number' };
+        }
+        if (diameter <= 0) {
+            return { valid: false, error: 'Diameter must be positive' };
+        }
+        return { valid: true };
+    },
+    
+    validateImage: function(imageMat) {
+        if (!imageMat || imageMat.empty()) {
+            return { valid: false, error: 'No image available' };
+        }
+        return { valid: true };
+    }
+};
+
+// File utilities
+const FileUtils = {
+    saveImage: function(canvas, filename = 'drape-measurement.png') {
+        try {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            return true;
+        } catch (error) {
+            console.error('Error saving image:', error);
+            return false;
+        }
+    },
+    
+    loadImage: function(file) {
+        return new Promise((resolve, reject) => {
+            // Check if file is provided
+            if (!file) {
+                reject(new Error('No file provided'));
+                return;
+            }
+            
+            // Check if file is an image
+            if (!file.type.match('image.*')) {
+                reject(new Error('File is not an image'));
+                return;
+            }
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const img = new Image();
+                
+                img.onload = function() {
+                    console.log('Image loaded successfully:', img.width, 'x', img.height);
+                    resolve(img);
+                };
+                
+                img.onerror = function(err) {
+                    console.error('Error loading image:', err);
+                    reject(new Error('Failed to load image'));
+                };
+                
+                img.src = e.target.result;
+            };
+            
+            reader.onerror = function(err) {
+                console.error('FileReader error:', err);
+                reject(new Error('Failed to read file'));
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    },
+    
+    loadImageToMat: function(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    // Create canvas to convert image to Mat
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Check if OpenCV is loaded
+                    if (typeof cv === 'undefined') {
+                        reject(new Error('OpenCV not loaded'));
+                        return;
+                    }
+                    
+                    const mat = cv.matFromImageData(imageData);
+                    resolve(mat);
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+};
+
+// Drape calculation formulas
+const DrapeFormulas = {
+    // Calculate area from diameter
+    circleArea: function(diameter) {
+        const radius = diameter / 2;
+        return Math.PI * radius * radius;
+    },
+    
+    // Standard drape coefficient formula
+    drapeCoefficient: function(drapedArea, diskDiameter, fabricDiameter) {
+        const diskArea = this.circleArea(diskDiameter);
+        const fabricArea = this.circleArea(fabricDiameter);
+        
+        if (fabricArea === diskArea) return 0;
+        
+        return ((drapedArea - diskArea) / (fabricArea - diskArea)) * 100;
+    },
+    
+    // Calculate fabric properties
+    fabricProperties: function(drapeCoefficient) {
+        // Categorize drape based on coefficient
+        if (drapeCoefficient < 30) return 'Stiff';
+        if (drapeCoefficient < 60) return 'Medium Drape';
+        if (drapeCoefficient < 85) return 'Good Drape';
+        return 'Excellent Drape';
+    }
+};
+
+// UI utilities
+const UIUtils = {
+    showToast: function(message, type = 'info') {
+        try {
+            // Remove existing toast
+            const existingToast = document.querySelector('.toast');
+            if (existingToast) existingToast.remove();
+            
+            // Create new toast
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            
+            // Style the toast
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 12px 20px;
+                background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
+                color: white;
+                border-radius: 6px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                z-index: 10000;
+                animation: slideIn 0.3s ease;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-size: 14px;
+                max-width: 300px;
+                word-wrap: break-word;
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Remove toast after 3 seconds
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+            
+        } catch (error) {
+            console.error('Error showing toast:', error);
+        }
+    },
+    
+    showLoading: function(show = true) {
+        try {
+            let loader = document.getElementById('global-loader');
+            
+            if (show && !loader) {
+                loader = document.createElement('div');
+                loader.id = 'global-loader';
+                loader.innerHTML = '<div class="loader"></div><p>Processing...</p>';
+                loader.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(255,255,255,0.9);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 9999;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                `;
+                document.body.appendChild(loader);
+            } else if (!show && loader) {
+                loader.remove();
+            }
+        } catch (error) {
+            console.error('Error showing loading:', error);
+        }
+    },
+    
+    updateButtonState: function(buttonId, enabled, text = null) {
+        try {
+            const button = document.getElementById(buttonId);
+            if (!button) {
+                console.warn('Button not found:', buttonId);
+                return;
+            }
+            
+            button.disabled = !enabled;
+            if (text !== null) {
+                button.innerHTML = text;
+            }
+        } catch (error) {
+            console.error('Error updating button state:', error);
+        }
+    },
+    
+    // Create a draggable/resizable circle for cropping
+    createCropCircle: function(canvas, centerX, centerY, diameter) {
+        const circle = document.createElement('div');
+        circle.className = 'crop-circle';
+        circle.style.cssText = `
+            position: absolute;
+            left: ${centerX - diameter/2}px;
+            top: ${centerY - diameter/2}px;
+            width: ${diameter}px;
+            height: ${diameter}px;
+            border: 2px dashed #3498db;
+            border-radius: 50%;
+            background: transparent;
+            z-index: 4;
+            cursor: move;
+            box-sizing: border-box;
+        `;
+        
+        canvas.parentElement.appendChild(circle);
+        return circle;
+    }
+};
+
+// Add CSS for animations
+(function() {
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+// Export all utilities
+window.ImageUtils = ImageUtils;
+window.Validation = Validation;
+window.FileUtils = FileUtils;
+window.DrapeFormulas = DrapeFormulas;
+window.UIUtils = UIUtils;
