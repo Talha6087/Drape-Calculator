@@ -1,3 +1,5 @@
+[file name]: style.css
+[file content begin]
 * {
     margin: 0;
     padding: 0;
@@ -63,70 +65,73 @@ header h1 {
     color: #3498db;
 }
 
-/* Camera Container */
-.camera-container {
+/* Image Display Container */
+.image-display-container {
     position: relative;
     width: 100%;
-    height: 400px;
-    background: #000;
+    min-height: 400px;
+    background: #f8f9fa;
     border-radius: 10px;
     overflow: hidden;
     margin-bottom: 20px;
+    border: 2px dashed #ddd;
 }
 
-#video, #canvas {
+.image-wrapper {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    overflow: hidden;
+}
+
+#mainCanvas, #video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    cursor: crosshair;
 }
 
-.overlay {
+.zoom-controls {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 10;
 }
 
-.target-circle {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 80%;
-    height: 80%;
-    border: 2px dashed rgba(255, 255, 255, 0.7);
+.zoom-btn {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
+    background: rgba(52, 152, 219, 0.9);
+    color: white;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    transition: all 0.3s ease;
 }
 
-.crosshair {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 20px;
-    height: 20px;
+.zoom-btn:hover {
+    background: #2980b9;
+    transform: scale(1.1);
 }
 
-.crosshair::before, .crosshair::after {
-    content: '';
-    position: absolute;
-    background: rgba(255, 0, 0, 0.7);
+.crop-controls {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 10px;
+    margin-top: 15px;
+    border: 2px solid #3498db;
 }
 
-.crosshair::before {
-    width: 20px;
-    height: 2px;
-    top: 9px;
-    left: 0;
-}
-
-.crosshair::after {
-    width: 2px;
-    height: 20px;
-    top: 0;
-    left: 9px;
+.crop-controls h4 {
+    margin-bottom: 15px;
+    color: #2c3e50;
 }
 
 /* Controls */
@@ -135,6 +140,13 @@ header h1 {
     gap: 15px;
     justify-content: center;
     flex-wrap: wrap;
+}
+
+.capture-controls {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 20px;
 }
 
 .btn {
@@ -172,10 +184,26 @@ header h1 {
     color: white;
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+    color: white;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+}
+
 .btn-outline {
     background: transparent;
     border: 2px solid #3498db;
     color: #3498db;
+}
+
+.btn-small {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+    min-width: auto;
 }
 
 .btn:hover {
@@ -187,6 +215,40 @@ header h1 {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+}
+
+/* Reference Instructions */
+.reference-instructions {
+    background: #e8f4fc;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid #3498db;
+}
+
+.reference-instructions p {
+    margin-bottom: 8px;
+    color: #2c3e50;
+}
+
+.reference-selection {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    align-items: end;
+}
+
+.reference-display {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.reference-display p {
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #2c3e50;
 }
 
 /* Form Controls */
@@ -319,6 +381,44 @@ tbody tr:hover {
     padding-left: 5px;
 }
 
+/* Selection Line Styling */
+.selection-line {
+    position: absolute;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.selection-line .line {
+    stroke: #ff0000;
+    stroke-width: 2;
+    stroke-dasharray: 5, 5;
+}
+
+.selection-line .start-point,
+.selection-line .end-point {
+    fill: #ff0000;
+    stroke: white;
+    stroke-width: 2;
+    r: 6;
+}
+
+.selection-line .measurement {
+    fill: white;
+    font-size: 12px;
+    font-weight: bold;
+    text-anchor: middle;
+}
+
+/* Cropping Circle */
+.crop-circle {
+    position: absolute;
+    pointer-events: none;
+    border: 2px dashed #3498db;
+    border-radius: 50%;
+    background: transparent;
+    z-index: 4;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .container {
@@ -337,8 +437,12 @@ tbody tr:hover {
         width: 100%;
     }
     
-    .camera-container {
+    .image-wrapper {
         height: 300px;
+    }
+    
+    .reference-selection {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -357,3 +461,4 @@ tbody tr:hover {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+[file content end]
