@@ -1,3 +1,5 @@
+[file name]: index.html
+[file content begin]
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,23 +15,24 @@
     <div class="container">
         <header>
             <h1><i class="fas fa-ruler-combined"></i> Drape Area Calculator</h1>
-            <p class="subtitle">Measure fabric drape area using your phone camera or uploaded images</p>
+            <p class="subtitle">Measure fabric drape area with automatic coin detection</p>
         </header>
 
         <!-- Setup Instructions -->
         <div class="card instructions">
-            <h2><i class="fas fa-info-circle"></i> Setup Instructions</h2>
+            <h2><i class="fas fa-info-circle"></i> How to Use</h2>
             <ol>
-                <li>Position phone directly above drape tester OR upload image</li>
-                <li>Place a coin (for scale) next to drape</li>
-                <li>Ensure good lighting and contrast</li>
-                <li>Use zoom controls for precise reference selection</li>
+                <li><strong>Step 1:</strong> Upload image or use camera</li>
+                <li><strong>Step 2:</strong> Click precisely on the coin in the image</li>
+                <li><strong>Step 3:</strong> System auto-detects coin and sets scale</li>
+                <li><strong>Step 4:</strong> Auto-process for drape area and coefficient</li>
             </ol>
+            <p class="tip"><i class="fas fa-lightbulb"></i> Tip: Ensure coin is clearly visible for best detection</p>
         </div>
 
         <!-- Image Source Selection -->
         <div class="card">
-            <h3><i class="fas fa-image"></i> Image Source</h3>
+            <h3><i class="fas fa-image"></i> Get Image</h3>
             <div class="controls">
                 <button id="startCamera" class="btn btn-primary">
                     <i class="fas fa-camera"></i> Use Camera
@@ -46,8 +49,9 @@
             </div>
         </div>
 
-        <!-- Camera/Image Display Section -->
+        <!-- Image Display -->
         <div class="card">
+            <h3><i class="fas fa-search"></i> Image & Coin Selection</h3>
             <div class="image-display-container">
                 <video id="video" autoplay playsinline style="display:none;"></video>
                 <div class="image-wrapper">
@@ -64,61 +68,53 @@
                         </button>
                     </div>
                 </div>
-                
-                <!-- Cropping Controls -->
-                <div class="crop-controls" id="cropControls" style="display:none;">
-                    <h4><i class="fas fa-crop-alt"></i> Circular Crop</h4>
-                    <div class="form-group">
-                        <label for="cropDiameter">Crop Diameter (cm):</label>
-                        <input type="number" id="cropDiameter" class="form-control" value="30.0" step="0.1" min="1">
-                    </div>
-                    <button id="applyCrop" class="btn btn-small btn-success">
-                        <i class="fas fa-check"></i> Apply Crop
-                    </button>
-                    <button id="cancelCrop" class="btn btn-small btn-secondary">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                </div>
+                <p class="click-instruction">
+                    <i class="fas fa-mouse-pointer"></i> Click exactly on the coin in the image above
+                </p>
             </div>
             
             <div class="capture-controls">
                 <button id="capture" class="btn btn-success" disabled>
-                    <i class="fas fa-camera-retro"></i> Capture & Analyze
-                </button>
-                <button id="enableCrop" class="btn btn-warning" disabled>
-                    <i class="fas fa-crop-alt"></i> Enable Cropping
+                    <i class="fas fa-camera-retro"></i> Capture Image
                 </button>
             </div>
         </div>
 
         <!-- Reference Selection -->
         <div class="card">
-            <h3><i class="fas fa-bullseye"></i> Reference Selection</h3>
+            <h3><i class="fas fa-bullseye"></i> Reference Coin</h3>
             <div class="reference-instructions">
-                <p><strong>Step 1:</strong> Click and drag on the image to create a reference line across the coin diameter</p>
-                <p><strong>Step 2:</strong> Enter the actual diameter of the coin/object</p>
+                <p><strong>After clicking on coin:</strong></p>
+                <p>1. Coin will be auto-detected and circled in red</p>
+                <p>2. Scale will be automatically calculated</p>
+                <p>3. Drape area will be auto-processed</p>
             </div>
             
             <div class="reference-selection">
                 <div class="form-group">
-                    <label for="refType">Predefined Objects:</label>
+                    <label for="refType">Coin Type:</label>
                     <select id="refType" class="form-control">
                         <option value="coin">Indian 1 Rupee Coin (2.5cm)</option>
                         <option value="coin2">Indian 2 Rupee Coin (2.7cm)</option>
                         <option value="coin5">Indian 5 Rupee Coin (2.5cm)</option>
-                        <option value="custom">Custom Object</option>
+                        <option value="custom">Custom Size</option>
                     </select>
                 </div>
                 
-                <div class="form-group">
-                    <label for="refDiameter">Actual Diameter (cm):</label>
-                    <input type="number" id="refDiameter" class="form-control" step="0.01" min="0.1" value="2.5">
+                <div id="customRef" style="display:none;">
+                    <div class="form-group">
+                        <label for="refDiameter">Diameter (cm):</label>
+                        <input type="number" id="refDiameter" class="form-control" step="0.01" min="0.1" value="2.5">
+                    </div>
                 </div>
                 
                 <div class="reference-display">
-                    <p>Pixel Distance: <span id="pixelDistance">--</span> px</p>
-                    <p>Scale: <span id="scaleFactor">--</span> px/cm</p>
-                    <button id="clearReference" class="btn btn-small btn-danger">
+                    <div class="reference-info">
+                        <p><strong>Coin Detection:</strong> <span id="detectionStatus">Not detected</span></p>
+                        <p><strong>Pixel Diameter:</strong> <span id="pixelDistance">--</span> px</p>
+                        <p><strong>Scale:</strong> <span id="scaleFactor">--</span> px/cm</p>
+                    </div>
+                    <button id="clearReference" class="btn btn-small btn-danger" disabled>
                         <i class="fas fa-trash"></i> Clear Reference
                     </button>
                 </div>
@@ -130,11 +126,7 @@
             <h2><i class="fas fa-chart-bar"></i> Results</h2>
             <div id="results" class="results-container">
                 <div class="result-item">
-                    <span class="label">Pixel Area:</span>
-                    <span id="pixelArea" class="value">--</span>
-                </div>
-                <div class="result-item">
-                    <span class="label">Actual Area (cm²):</span>
+                    <span class="label">Drape Area (cm²):</span>
                     <span id="actualArea" class="value">--</span>
                 </div>
                 <div class="result-item">
@@ -142,25 +134,29 @@
                     <span id="drapeCoefficient" class="value">--</span>
                 </div>
                 <div class="result-item">
+                    <span class="label">Fabric Property:</span>
+                    <span id="fabricProperty" class="value">--</span>
+                </div>
+                <div class="result-item">
                     <span class="label">Status:</span>
-                    <span id="status" class="value">Ready</span>
+                    <span id="status" class="value">Ready to start</span>
                 </div>
             </div>
             
             <!-- Visual Output -->
             <div class="image-comparison">
                 <div class="image-box">
-                    <h4>Original/Cropped</h4>
+                    <h4>Original with Coin</h4>
                     <canvas id="outputCanvas"></canvas>
                 </div>
                 <div class="image-box">
-                    <h4>Processed</h4>
+                    <h4>Drape Area Detected</h4>
                     <canvas id="processedCanvas"></canvas>
                 </div>
             </div>
         </div>
 
-        <!-- Drape Tester Info -->
+        <!-- Drape Tester Settings -->
         <div class="card">
             <h3><i class="fas fa-cogs"></i> Drape Tester Settings</h3>
             <div class="form-row">
@@ -173,9 +169,13 @@
                     <input type="number" id="fabricDiameter" class="form-control" value="30.0" step="0.1">
                 </div>
             </div>
-            <button id="calculateDrape" class="btn btn-info">
-                <i class="fas fa-calculator"></i> Calculate Drape %
-            </button>
+            <div class="form-group">
+                <label for="autoCalculate">Auto Calculate:</label>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="autoCalculate" checked>
+                    <label for="autoCalculate">Automatically calculate drape after coin detection</label>
+                </div>
+            </div>
         </div>
 
         <!-- History -->
@@ -187,6 +187,7 @@
                         <th>Time</th>
                         <th>Area (cm²)</th>
                         <th>Drape %</th>
+                        <th>Property</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -194,12 +195,14 @@
                     <!-- Will be populated by JS -->
                 </tbody>
             </table>
-            <button id="exportData" class="btn btn-outline">
-                <i class="fas fa-download"></i> Export CSV
-            </button>
-            <button id="saveImage" class="btn btn-outline" disabled>
-                <i class="fas fa-save"></i> Save Result Image
-            </button>
+            <div class="history-controls">
+                <button id="exportData" class="btn btn-outline">
+                    <i class="fas fa-download"></i> Export CSV
+                </button>
+                <button id="saveImage" class="btn btn-outline" disabled>
+                    <i class="fas fa-save"></i> Save Result
+                </button>
+            </div>
         </div>
     </div>
 
@@ -208,3 +211,4 @@
     <script src="script.js"></script>
 </body>
 </html>
+[file content end]
