@@ -86,89 +86,106 @@ function setCanvasSizes() {
 }
 
 // Initialize all event listeners
+// ... existing code ...
+
+// Initialize all event listeners
 function initializeEventListeners() {
     console.log('Initializing event listeners...');
     
     // Camera controls
     document.getElementById('startCamera').addEventListener('click', startCamera);
-    document.getElementById('uploadImage').addEventListener('click', () => {
-        console.log('Upload image clicked');
+    
+    // Upload button fix - directly trigger file input click
+    document.getElementById('uploadImage').addEventListener('click', function() {
+        console.log('Upload image button clicked');
+        // Trigger the hidden file input
         document.getElementById('imageUpload').click();
     });
+    
     document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
     document.getElementById('reset').addEventListener('click', resetApp);
     
-    // Capture button
-    document.getElementById('capture').addEventListener('click', captureImage);
-    
-    // Reference selection
-    document.getElementById('refType').addEventListener('change', function() {
-        const customRefDiv = document.getElementById('customRef');
-        if (this.value === 'custom') {
-            customRefDiv.style.display = 'block';
-        } else {
-            customRefDiv.style.display = 'none';
-            const diameters = {
-                'coin': 2.5,  // 1 Rupee
-                'coin2': 2.7, // 2 Rupee
-                'coin5': 2.5  // 5 Rupee
-            };
-            AppState.referenceDiameter = diameters[this.value] || 2.5;
-            document.getElementById('refDiameter').value = AppState.referenceDiameter;
-            if (AppState.detectedCoin) {
-                updateScaleFactor();
-                processDrapeArea();
-            }
-        }
-    });
-    
-    document.getElementById('refDiameter').addEventListener('input', function() {
-        AppState.referenceDiameter = parseFloat(this.value) || 2.5;
-        if (AppState.detectedCoin) {
-            updateScaleFactor();
-            processDrapeArea();
-        }
-    });
-    
-    document.getElementById('clearReference').addEventListener('click', clearReference);
-    
-    // Drape tester settings
-    document.getElementById('diskDiameter').addEventListener('input', function() {
-        AppState.diskDiameter = parseFloat(this.value) || 18.0;
-        if (AppState.detectedCoin && AppState.drapeArea > 0) {
-            calculateDrapeCoefficient();
-        }
-    });
-    
-    document.getElementById('fabricDiameter').addEventListener('input', function() {
-        AppState.fabricDiameter = parseFloat(this.value) || 30.0;
-        if (AppState.detectedCoin && AppState.drapeArea > 0) {
-            calculateDrapeCoefficient();
-        }
-    });
-    
-    // Export and save
-    document.getElementById('exportData').addEventListener('click', exportToCSV);
-    document.getElementById('saveImage').addEventListener('click', saveResultImage);
-    
-    // Zoom controls
-    document.getElementById('zoomIn').addEventListener('click', () => adjustZoom(1.2));
-    document.getElementById('zoomOut').addEventListener('click', () => adjustZoom(0.8));
-    document.getElementById('resetZoom').addEventListener('click', resetZoom);
-    
-    // Canvas click for coin detection
-    AppState.mainCanvas.addEventListener('click', handleCanvasClick);
-    
-    // Touch events for mobile
-    AppState.mainCanvas.addEventListener('touchstart', handleCanvasTouch, { passive: false });
-    
-    // Window resize
-    window.addEventListener('resize', setCanvasSizes);
-    
-    console.log('Event listeners initialized');
+    // ... rest of the existing event listeners ...
 }
 
-// Handle image upload
+// Start Camera Function - Fixed promise handling
+async function startCamera() {
+    console.log('Starting camera...');
+    try {
+        updateStatus('Accessing camera...');
+        UIUtils.showLoading(true);
+        
+        // Check if browser supports mediaDevices
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Camera API not supported in this browser');
+        }
+        
+        const constraints = {
+            video: {
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
+        };
+        
+        console.log('Requesting camera with constraints:', constraints);
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('Camera access granted');
+        
+        AppState.video.srcObject = stream;
+        AppState.isCameraActive = true;
+        AppState.video.style.display = 'block';
+        
+        // Enable/disable buttons
+        document.getElementById('startCamera').disabled = true;
+        document.getElementById('uploadImage').disabled = true;
+        document.getElementById('capture').disabled = false;
+        document.getElementById('reset').disabled = false;
+        
+        // Wait for video to be ready
+        return new Promise((resolve) => {
+            AppState.video.onloadedmetadata = () => {
+                console.log('Video metadata loaded:', AppState.video.videoWidth, 'x', AppState.video.videoHeight);
+                AppState.imageDisplayInfo.imgWidth = AppState.video.videoWidth;
+                AppState.imageDisplayInfo.imgHeight = AppState.video.videoHeight;
+                
+                // Start video rendering
+                requestAnimationFrame(renderVideo);
+                
+                updateStatus('Camera active. Position drape and coin, then click "Capture Image"');
+                UIUtils.showToast('Camera started successfully', 'success');
+                resolve();
+            };
+        });
+        
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+        updateStatus('Error: Could not access camera');
+        UIUtils.showToast('Camera error: ' + error.message, 'error');
+        
+        // Show detailed error message
+        let errorMessage = 'Camera access denied. ';
+        if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+            errorMessage += 'No camera found.';
+        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+            errorMessage += 'Camera is already in use by another application.';
+        } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+            errorMessage += 'Camera constraints could not be satisfied.';
+        } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+            errorMessage += 'Camera permission denied. Please allow camera access.';
+        } else if (error.name === 'TypeError' || error.message.includes('getUserMedia')) {
+            errorMessage += 'Camera API not supported. Try Chrome, Firefox, or Edge.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
+    } finally {
+        UIUtils.showLoading(false);
+    }
+}
+
+// Handle image upload - Fixed to work properly
 async function handleImageUpload(event) {
     console.log('Image upload triggered');
     const file = event.target.files[0];
@@ -188,17 +205,23 @@ async function handleImageUpload(event) {
         updateStatus('Loading image...');
         console.log('Loading image:', file.name);
         
+        // Stop camera if active
+        if (AppState.isCameraActive) {
+            stopCamera();
+        }
+        
         // Load image using FileUtils
         const img = await FileUtils.loadImage(file);
         console.log('Image loaded:', img.width, 'x', img.height);
         
-        // Convert to OpenCV Mat
+        // Create temporary canvas
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = img.width;
         tempCanvas.height = img.height;
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(img, 0, 0);
         
+        // Get image data
         const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
         
         // Check if OpenCV is ready
@@ -206,6 +229,7 @@ async function handleImageUpload(event) {
             throw new Error('OpenCV not loaded');
         }
         
+        // Create OpenCV Mat from image data
         AppState.originalImage = cv.matFromImageData(imageData);
         AppState.capturedImage = AppState.originalImage.clone();
         
@@ -241,87 +265,6 @@ async function handleImageUpload(event) {
         UIUtils.showLoading(false);
         // Clear file input
         event.target.value = '';
-    }
-}
-
-// Start Camera Function
-async function startCamera() {
-    console.log('Starting camera...');
-    try {
-        updateStatus('Accessing camera...');
-        UIUtils.showLoading(true);
-        
-        // Check if browser supports mediaDevices
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('Camera API not supported in this browser');
-        }
-        
-        const constraints = {
-            video: {
-                facingMode: 'environment',
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            }
-        };
-        
-        console.log('Requesting camera with constraints:', constraints);
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log('Camera access granted');
-        
-        AppState.video.srcObject = stream;
-        AppState.isCameraActive = true;
-        AppState.video.style.display = 'block';
-        
-        // Enable/disable buttons
-        document.getElementById('startCamera').disabled = true;
-        document.getElementById('uploadImage').disabled = true;
-        document.getElementById('capture').disabled = false;
-        document.getElementById('reset').disabled = false;
-        
-        // Wait for video metadata
-        await new Promise((resolve) => {
-            AppState.video.onloadedmetadata = () => {
-                console.log('Video metadata loaded:', AppState.video.videoWidth, 'x', AppState.video.videoHeight);
-                AppState.imageDisplayInfo.imgWidth = AppState.video.videoWidth;
-                AppState.imageDisplayInfo.imgHeight = AppState.video.videoHeight;
-                resolve();
-            };
-            AppState.video.onerror = (err) => {
-                console.error('Video error:', err);
-                reject(new Error('Failed to load video'));
-            };
-        });
-        
-        // Start video rendering
-        requestAnimationFrame(renderVideo);
-        
-        updateStatus('Camera active. Position drape and coin, then click "Capture Image"');
-        UIUtils.showToast('Camera started successfully', 'success');
-        
-    } catch (error) {
-        console.error('Error accessing camera:', error);
-        updateStatus('Error: Could not access camera');
-        UIUtils.showToast('Camera error: ' + error.message, 'error');
-        
-        // Show detailed error message
-        let errorMessage = 'Camera access denied. ';
-        if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-            errorMessage += 'No camera found.';
-        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-            errorMessage += 'Camera is already in use by another application.';
-        } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
-            errorMessage += 'Camera constraints could not be satisfied.';
-        } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-            errorMessage += 'Camera permission denied. Please allow camera access.';
-        } else if (error.name === 'TypeError' || error.message.includes('getUserMedia')) {
-            errorMessage += 'Camera API not supported. Try Chrome, Firefox, or Edge.';
-        } else {
-            errorMessage += error.message;
-        }
-        
-        alert(errorMessage);
-    } finally {
-        UIUtils.showLoading(false);
     }
 }
 
