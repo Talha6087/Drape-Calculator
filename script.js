@@ -129,6 +129,7 @@ async function startCamera() {
         console.log('Camera access granted');
         
         AppState.video.srcObject = stream;
+        await AppState.video.play();
         AppState.isCameraActive = true;
         AppState.video.style.display = 'block';
         
