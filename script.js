@@ -1,4 +1,3 @@
-// Main Application State
 const AppState = {
     video: null,
     mainCanvas: null,
