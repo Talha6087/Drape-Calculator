@@ -1307,14 +1307,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 30000);
     }
 });
-[file content end]
-```
-
-Also update utils.js to ensure FileUtils.loadImage works correctly:
-
-```javascript
-[file name]: utils.js
-[file content begin]
 // Utility functions for the Drape Calculator
 
 // Image processing utilities
