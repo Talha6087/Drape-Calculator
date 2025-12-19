@@ -96,16 +96,12 @@ function initializeEventListeners() {
     document.getElementById('startCamera').addEventListener('click', startCamera);
     
     // Upload button fix - directly trigger file input click
-    document.getElementById('uploadImage').addEventListener('click', function() {
-        console.log('Upload image button clicked');
-        // Trigger the hidden file input
-        document.getElementById('imageUpload').click();
-    });
-    
+  document.getElementById('uploadImage').addEventListener('click', function () {
+    document.getElementById('imageUpload').click();
+});
     document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
     document.getElementById('reset').addEventListener('click', resetApp);
     
-    // ... rest of the existing event listeners ...
 }
 
 // Start Camera Function - Fixed promise handling
